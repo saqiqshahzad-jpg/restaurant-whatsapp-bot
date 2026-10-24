@@ -11,8 +11,8 @@ const accentColors = {
   rose: { bg: 'bg-rose-500', text: 'text-rose-500', border: 'border-rose-500', glow: 'bg-rose-500/20' },
 };
 
-// 🛑 API URL Live Backend
-const API_URL = 'https://ca-real-estate-ai.onrender.com'; 
+// API URL Live Backend
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000'; 
 
 export default function App() {
   // --- 🧠 AUTH STATES ---
@@ -40,7 +40,7 @@ export default function App() {
   const isPasswordValid = pwdReqs.length && pwdReqs.uppercase && pwdReqs.number && pwdReqs.special;
 
   // --- 🧠 CHAT STATES ---
-  const defaultWelcomeMessage = { role: 'ai', text: "Hi! Welcome to our Premium Real Estate Gateway. Are you looking to find your next dream home, or are you curious about what your current property is worth in today's market? 🏡✨", id: 1 };
+  const defaultWelcomeMessage = { role: 'ai', text: "Hi! Welcome to our Restaurant Food Ordering Service! 🍔🍕 Browse our menu, customize your order, or check your cart to get started. How can I assist you today?", id: 1 };
   
   const [messages, setMessages] = useState([defaultWelcomeMessage]);
   const [input, setInput] = useState('');
@@ -70,7 +70,7 @@ export default function App() {
     const savedUser = localStorage.getItem('al_elite_user_final3');
     if (savedUser) setUser(JSON.parse(savedUser));
 
-    const savedData = JSON.parse(localStorage.getItem('al_pro_estate_final3')) || {};
+    const savedData = JSON.parse(localStorage.getItem('restaurant_order_chat_data')) || {};
     setChatHistory(savedData.history || []);
     if(savedData.accent) setSelectedAccent(savedData.accent);
     if(savedData.isDarkMode !== undefined) setIsDarkMode(savedData.isDarkMode);
@@ -78,7 +78,7 @@ export default function App() {
 
   useEffect(() => {
     if (user && !isTempChat) {
-      localStorage.setItem('al_pro_estate_final3', JSON.stringify({
+      localStorage.setItem('restaurant_order_chat_data', JSON.stringify({
         history: chatHistory,
         accent: selectedAccent,
         isDarkMode: isDarkMode
@@ -211,7 +211,7 @@ export default function App() {
             const userData = { email };
             localStorage.setItem('al_elite_user_final3', JSON.stringify(userData));
             
-            const savedData = JSON.parse(localStorage.getItem('al_pro_estate_final3')) || {};
+            const savedData = JSON.parse(localStorage.getItem('restaurant_order_chat_data')) || {};
             if (savedData.history) {
                 setChatHistory(savedData.history);
             }
@@ -323,9 +323,9 @@ export default function App() {
 
     try {
       const requestBody = {
-          message: payloadInputText || `User uploaded a document for analysis.`,
+          message: payloadInputText || `Customer query.`,
           email: user ? user.email : "guest",
-          client_id: "ca_realestate",
+          client_id: "restaurant_bot",
           history: currentMemory 
       };
 
@@ -382,10 +382,11 @@ export default function App() {
       const lastMsgText = lastMsg.text.toLowerCase();
 
       // ONLY show for the initial welcome message
-      if (lastMsg.role === 'ai' && lastMsgText.includes("welcome to our premium real estate gateway")) {
+      if (lastMsg.role === 'ai' && lastMsgText.includes("restaurant food ordering service")) {
           return [
-              "I want to Buy", 
-              "I want to Sell"
+              "View Menu 📋", 
+              "Order Food 🍔",
+              "My Cart 🛒"
           ];
       }
 
@@ -473,8 +474,8 @@ export default function App() {
           <div className="p-5 space-y-4 flex-shrink-0">
             <div className="flex items-center justify-between">
               <h1 className={`text-xl font-extrabold tracking-tighter flex items-center gap-2 ${theme.textPrimary}`}>
-                 <img src={logoImg} alt="CA Real Estate Advisor" className="w-12 h-12 rounded-xl object-cover shadow-lg border border-white/10" />
-                 CA Real Estate Advisor <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded-md text-white shadow-md ${accent.bg}`}>v3.0</span>
+                 <img src={logoImg} alt="Restaurant Food Ordering Bot" className="w-12 h-12 rounded-xl object-cover shadow-lg border border-white/10" />
+                 Restaurant Food Ordering <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded-md text-white shadow-md ${accent.bg}`}>v3.0</span>
               </h1>
               <button onClick={() => setIsSidebarOpen(false)} className="md:hidden opacity-50 p-2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
             </div>
@@ -599,7 +600,7 @@ export default function App() {
             <div className="flex items-center gap-3">
               <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-white/5 transition"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12h18M3 6h18M3 18h18"/></svg></button>
               <span className={`text-[12px] md:text-sm font-extrabold tracking-widest uppercase flex items-center gap-3 ${theme.textPrimary}`}>
-                 CA Real Estate ADVISOR
+                 Restaurant Food Ordering Bot
                  <span className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full ${accent.bg} animate-pulse`}></span>
               </span>
             </div>
@@ -619,7 +620,7 @@ export default function App() {
                         <svg className={theme.textSecondary} width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
                     </div>
                     <h1 className={`text-3xl md:text-4xl font-extrabold mt-4 tracking-tighter ${theme.textPrimary} mb-3`}>Ready to Assist.</h1>
-                    <p className={`text-sm ${theme.textSecondary}`}>Ask questions or upload your property documents for analysis.</p>
+                    <p className={`text-sm ${theme.textSecondary}`}>Ask questions about dishes, customize your meal, or place your food order.</p>
                  </div>
               )}
 

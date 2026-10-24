@@ -5,3 +5,7 @@ backend/.env
 **/.env
 backend/credentials.json
 credentials.json
+__pycache__/
+*.py[cod]
+*$py.class
+backend/__pycache__/

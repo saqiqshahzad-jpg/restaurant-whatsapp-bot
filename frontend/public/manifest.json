@@ -1,6 +1,6 @@
 {
-  "short_name": "CA Real Estate ADVISOR",
-  "name": "CA Real Estate ADVISOR",
+  "short_name": "Food Ordering AI",
+  "name": "Restaurant Food Ordering Bot",
   "icons": [
     {
       "src": "favicon.ico",
@@ -11,8 +11,8 @@
       "src": "logo.png",
       "type": "image/png",
       "sizes": "192x192"
-    },
-    
+    }
+  ],
   "start_url": ".",
   "display": "standalone",
   "theme_color": "#000000",

@@ -1,8 +1,8 @@
 (function () {
-    // 1️⃣ CREATE FLOATING CHAT BUTTON
+    // 1. CREATE FLOATING CHAT BUTTON
     const chatButton = document.createElement('div');
-    chatButton.id = 'alaaudin-ai-trigger';
-    chatButton.innerHTML = '💬';
+    chatButton.id = 'restaurant-ai-trigger';
+    chatButton.innerHTML = '🍔';
     Object.assign(chatButton.style, {
         position: 'fixed',
         bottom: '20px',
@@ -22,9 +22,9 @@
     });
     document.body.appendChild(chatButton);
 
-    // 2️⃣ CREATE THE CHAT IFRAME CONTAINER
+    // 2. CREATE THE CHAT IFRAME CONTAINER
     const chatContainer = document.createElement('div');
-    chatContainer.id = 'alaaudin-ai-container';
+    chatContainer.id = 'restaurant-ai-container';
     Object.assign(chatContainer.style, {
         position: 'fixed',
         bottom: '90px',
@@ -40,22 +40,21 @@
         border: '1px solid #e4e4e7'
     });
 
-    // 3️⃣ INJECT YOUR LIVE VERCEL FRONTEND LINK HERE
-    // Replace 'YOUR_VERCEL_FRONTEND_URL' with your actual live chat UI link
+    // 3. INJECT FRONTEND LINK
     chatContainer.innerHTML = `
-        <iframe src="https://YOUR_VERCEL_FRONTEND_URL" style="width:100%; height:100%; border:none;"></iframe>
+        <iframe src="https://YOUR_FRONTEND_URL" style="width:100%; height:100%; border:none;"></iframe>
     `;
     document.body.appendChild(chatContainer);
 
-    // 4️⃣ TOGGLE LOGIC (Open/Close)
+    // 4. TOGGLE LOGIC (Open/Close)
     chatButton.onclick = function () {
         if (chatContainer.style.display === 'none') {
             chatContainer.style.display = 'block';
-            chatButton.innerHTML = '✖️';
+            chatButton.innerHTML = '✕';
             chatButton.style.transform = 'rotate(90deg)';
         } else {
             chatContainer.style.display = 'none';
-            chatButton.innerHTML = '💬';
+            chatButton.innerHTML = '🍔';
             chatButton.style.transform = 'rotate(0deg)';
         }
     };
