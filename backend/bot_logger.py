@@ -149,3 +149,4 @@ def get_recent_log_lines(max_lines: int = 150) -> List[str]:
             return [line.rstrip() for line in lines[-max_lines:]]
     except Exception as e:
         return [f"Failed to read log file: {e}"]
+

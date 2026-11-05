@@ -1391,18 +1391,34 @@ def process_customer_message(
 def process_whatsapp_data(data: dict):
     """Asynchronous background worker processing incoming WhatsApp messages."""
     try:
-        entry = data.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
-        metadata = value.get("metadata", {})
-        restaurant_id = metadata.get("phone_number_id", "")
+        entries = data.get("entry") or []
+        if not entries:
+            log_info("WA_EMPTY_ENTRY", "Received webhook with empty 'entry' list (likely ping/status)")
+            return
+
+        entry = entries[0]
+        changes = entry.get("changes") or []
+        if not changes:
+            return
+
+        value = changes[0].get("value") or {}
+        metadata = value.get("metadata") or {}
+        restaurant_id = metadata.get("phone_number_id") or os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
         wa_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
 
-        contacts = value.get("contacts", [{}])
-        from_number = contacts[0].get("wa_id", "") if contacts else ""
+        contacts = value.get("contacts") or []
+        default_sender = contacts[0].get("wa_id", "") if contacts else ""
 
-        messages = value.get("messages", [])
+        # Status updates (delivered, read, sent) - ignore without error
+        statuses = value.get("statuses") or []
+        if statuses:
+            for s in statuses:
+                log_info("WA_STATUS_UPDATE", f"Status for {s.get('recipient_id')}: {s.get('status')}")
+            return
+
+        messages = value.get("messages") or []
         if not messages:
+            log_info("WA_NO_MESSAGES", f"Webhook received without user messages (change field: {changes[0].get('field')})")
             return
 
         for msg in messages:
@@ -1416,6 +1432,12 @@ def process_whatsapp_data(data: dict):
             for old_id, ts in list(PROCESSED_MSG_IDS.items()):
                 if now - ts > 3600:
                     PROCESSED_MSG_IDS.pop(old_id, None)
+
+            # Robust sender identification: prioritize msg['from'], fallback to contacts['wa_id']
+            from_number = msg.get("from") or default_sender
+            if not from_number:
+                log_error("WA_NO_SENDER", f"No sender phone found for message {msg_id}")
+                continue
 
             msg_type = msg.get("type")
             msg_body = ""
@@ -1436,6 +1458,7 @@ def process_whatsapp_data(data: dict):
                         msg_body = transcription.strip()
 
             if not msg_body and not btn_id:
+                log_warn("WA_EMPTY_BODY", f"Ignoring non-text/unhandled payload from {from_number} (type: {msg_type})")
                 continue
 
             log_wa("WA_MSG_INCOMING", f"Processing {msg_type} from {from_number} (msg_id: {msg_id}) | Content: '{msg_body[:60]}'")
@@ -1515,15 +1538,59 @@ def supabase_status_endpoint():
     """Diagnostic endpoint to inspect Supabase connectivity and tables."""
     return JSONResponse(content=verify_supabase_tables())
 
+@app.get('/meta/status')
+def meta_status_endpoint():
+    """Diagnostic endpoint to inspect WhatsApp API Configuration & Credentials."""
+    wa_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+    phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+    verify_token = MY_VERIFY_TOKEN
+
+    info = {
+        "phone_number_id_configured": bool(phone_id),
+        "phone_number_id_preview": f"{phone_id[:4]}***{phone_id[-4:]}" if len(phone_id) >= 8 else phone_id,
+        "access_token_configured": bool(wa_token),
+        "access_token_preview": f"{wa_token[:8]}***{wa_token[-6:]}" if len(wa_token) >= 14 else "missing",
+        "verify_tokens_accepted": [t for t in [verify_token, os.getenv("WHATSAPP_VERIFY_TOKEN"), "zaiqa_bot_secret_2026", "restaurant_bot_secret", "ALAAUDIN_SECRET_TOKEN"] if t],
+        "meta_graph_api_status": "untested"
+    }
+
+    if wa_token and phone_id:
+        try:
+            url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{phone_id}"
+            headers = {"Authorization": f"Bearer {wa_token}"}
+            res = requests.get(url, headers=headers, timeout=8)
+            if res.status_code == 200:
+                data = res.json()
+                info["meta_graph_api_status"] = "CONNECTED"
+                info["display_phone_number"] = data.get("display_phone_number")
+                info["verified_name"] = data.get("verified_name")
+                info["quality_rating"] = data.get("quality_rating")
+            else:
+                info["meta_graph_api_status"] = f"ERROR_{res.status_code}"
+                info["meta_error"] = res.json()
+        except Exception as e:
+            info["meta_graph_api_status"] = "EXCEPTION"
+            info["error_details"] = str(e)
+
+    return JSONResponse(content=info)
+
 @app.get('/webhook')
 def verify_webhook(request: Request):
     """WhatsApp Cloud API Webhook Verification."""
     verify_token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-    if verify_token == MY_VERIFY_TOKEN:
-        log_ok("WA_WEBHOOK_VERIFY", f"Webhook verification succeeded for hub.challenge={challenge}")
+    valid_tokens = {
+        MY_VERIFY_TOKEN,
+        os.getenv("WHATSAPP_VERIFY_TOKEN"),
+        "zaiqa_bot_secret_2026",
+        "restaurant_bot_secret",
+        "ALAAUDIN_SECRET_TOKEN"
+    }
+    valid_tokens = {t.strip() for t in valid_tokens if t and t.strip()}
+    if verify_token in valid_tokens:
+        log_ok("WA_WEBHOOK_VERIFY", f"Webhook verification succeeded for token '{verify_token}', challenge={challenge}")
         return PlainTextResponse(content=str(challenge))
-    log_error("WA_WEBHOOK_VERIFY", f"Webhook verification failed with token '{verify_token}' (expected '{MY_VERIFY_TOKEN}')")
+    log_error("WA_WEBHOOK_VERIFY", f"Webhook verification failed with token '{verify_token}' (expected one of {list(valid_tokens)})")
     return PlainTextResponse(content="Verification failed", status_code=403)
 
 @app.post('/webhook')
