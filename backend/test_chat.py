@@ -79,10 +79,15 @@ def display_turn(result: dict):
     buttons = result.get("buttons", [])
     order_state = result.get("order_state", "BROWSING_MENU")
     cart = result.get("customer_cart", {})
+    media_url = result.get("media_url")
+    current_lang = result.get("current_language", "Roman Urdu")
 
     print(f"\n{CYAN}============================= [ BOT RESPONSE ] ============================={RESET}")
     print(f"\n{BOLD}{GREEN}🤖 Bot Reply:{RESET}")
     print(f"{reply_text}\n")
+
+    if media_url:
+        print(f"{BOLD}{YELLOW}🎬 [ATTACHED MEDIA / GIF]:{RESET} {BOLD}{GREEN}{media_url}{RESET} 🔥 (IShowSpeed OK GIF)")
 
     if buttons:
         print(f"{BOLD}{MAGENTA}🔘 Interactive Buttons:{RESET}")
@@ -91,7 +96,7 @@ def display_turn(result: dict):
             btn_display.append(f"{BOLD}[{i}]{RESET} {b}")
         print("   " + "   ".join(btn_display) + "\n")
 
-    print(f"{BOLD}{YELLOW}📊 Order State:{RESET} {BOLD}{order_state}{RESET}")
+    print(f"{BOLD}{YELLOW}📊 Order State:{RESET} {BOLD}{order_state}{RESET} | {BOLD}{BLUE}🌐 Language:{RESET} {BOLD}{current_lang}{RESET}")
 
     print(f"\n{BOLD}{CYAN}🛒 Live customer_cart JSON:{RESET}")
     cart_json_str = json.dumps(cart, indent=2, ensure_ascii=False)

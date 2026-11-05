@@ -10,3 +10,6 @@ __pycache__/
 *$py.class
 backend/__pycache__/
 backend/*_cache.json
+*.log
+backend/logs/*.log
+!backend/logs/.gitkeep

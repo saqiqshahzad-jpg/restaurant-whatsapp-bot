@@ -14,7 +14,7 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
+from fastapi import FastAPI, Request, BackgroundTasks, HTTPException, Response
 from fastapi.responses import PlainTextResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from groq import Groq
@@ -27,19 +27,48 @@ if _BACKEND_DIR not in sys.path:
     sys.path.insert(0, _BACKEND_DIR)
 
 try:
+    from bot_logger import (
+        bot_logger, log_ok, log_error, log_warn, log_info,
+        log_llm, log_db, log_wa, log_security, log_cron,
+        get_recent_log_lines
+    )
+except ImportError:
+    from backend.bot_logger import (
+        bot_logger, log_ok, log_error, log_warn, log_info,
+        log_llm, log_db, log_wa, log_security, log_cron,
+        get_recent_log_lines
+    )
+
+logger = bot_logger
+
+try:
     from menu_manager import menu_manager
 except ImportError:
     from backend.menu_manager import menu_manager
+
+try:
+    from language_helper import (
+        detect_foreign_language,
+        build_language_switch_offer,
+        is_smart_language_confirmation,
+        LANGUAGES_CONFIG
+    )
+except ImportError:
+    from backend.language_helper import (
+        detect_foreign_language,
+        build_language_switch_offer,
+        is_smart_language_confirmation,
+        LANGUAGES_CONFIG
+    )
+
+SPEED_OK_GIF_URL = "https://media.giphy.com/media/tsX3YMWYzDPjAARfeg/giphy.gif"
 
 # Load environment variables from .env file
 load_dotenv()
 
 # =========================================================================================
-# CONFIGURATION & LOGGING
+# FASTAPI APPLICATION & COMPREHENSIVE LOGGING MIDDLEWARE
 # =========================================================================================
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - [%(levelname)s] - %(message)s')
-logger = logging.getLogger("RESTAURANT_ORDER_BOT")
-
 app = FastAPI(title="Restaurant Food Ordering WhatsApp Bot")
 
 app.add_middleware(
@@ -49,6 +78,50 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def logging_and_timing_middleware(request: Request, call_next):
+    """
+    Enterprise HTTP Request/Response logger.
+    Logs every single incoming request, headers, method, path, client,
+    measures millisecond timing, logs successes as [OK], errors as [ERROR],
+    and handles HEAD requests with zero-byte body to prevent cron-job.org aborts.
+    """
+    start_time = time.time()
+    req_path = request.url.path
+    req_method = request.method
+    client_host = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "unknown")
+
+    # Fast-path for keep-alive HEAD requests (returns 0-byte body immediately)
+    if req_method == "HEAD":
+        log_cron("PING_HEAD", f"HEAD {req_path} from {client_host} ({user_agent[:50]}) -> 200 OK (0 bytes)")
+        return Response(content=b"", status_code=200, media_type="text/plain")
+
+    # Log incoming request
+    is_cron = any(bot in user_agent.lower() for bot in ["cron-job", "uptimerobot", "pingdom", "statuscake"])
+    if is_cron:
+        log_cron("PING_INCOMING", f"{req_method} {req_path} from {client_host} (UA: {user_agent[:50]})")
+    else:
+        log_info("HTTP_REQUEST", f"{req_method} {req_path} from {client_host} | UA: {user_agent[:60]}")
+
+    try:
+        response = await call_next(request)
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        if response.status_code < 400:
+            if is_cron or req_path in ["/", "/ping", "/health", "/keep-alive"]:
+                log_cron("PING_SUCCESS", f"Responded 200 OK to {req_method} {req_path} in {elapsed_ms:.1f}ms")
+            else:
+                log_ok("HTTP_SUCCESS", f"{response.status_code} {req_method} {req_path} completed in {elapsed_ms:.2f}ms")
+        else:
+            log_error("HTTP_FAIL", f"{response.status_code} {req_method} {req_path} completed in {elapsed_ms:.2f}ms")
+
+        return response
+    except Exception as exc:
+        elapsed_ms = (time.time() - start_time) * 1000
+        log_error("HTTP_EXCEPTION", f"Unhandled error in {req_method} {req_path} after {elapsed_ms:.2f}ms: {exc}", exc=exc)
+        return JSONResponse(status_code=500, content={"error": "Internal Server Error", "message": str(exc)})
 
 # ENVIRONMENT VARIABLES
 MY_VERIFY_TOKEN = os.getenv("MY_VERIFY_TOKEN", "restaurant_bot_secret")
@@ -233,6 +306,8 @@ def get_restaurant_session(phone: str, restaurant_id: str = "default_restaurant"
         "phone_number": clean_phone,
         "restaurant_id": restaurant_id,
         "order_state": OrderState.BROWSING_MENU,
+        "current_language": "Roman Urdu",
+        "pending_language": None,
         "customer_cart": calculate_cart_totals({}),
         "customer_details": {
             "customer_name": None,
@@ -251,7 +326,9 @@ def get_restaurant_session(phone: str, restaurant_id: str = "default_restaurant"
     if clean_phone in cached_sessions:
         cached = cached_sessions[clean_phone]
         cached["customer_cart"] = calculate_cart_totals(cached.get("customer_cart", {}))
-        return {**default_session, **cached}
+        merged = {**default_session, **cached}
+        log_db("SESSION_CACHE_HIT", f"Session retrieved from fast local cache for {clean_phone} (State: {merged.get('order_state')})")
+        return merged
 
     # 2. Check Supabase if not found in local cache
     if SUPABASE_URL and SUPABASE_KEY:
@@ -262,14 +339,16 @@ def get_restaurant_session(phone: str, restaurant_id: str = "default_restaurant"
                 row = res.json()[0]
                 saved_state = row.get("order_state") or default_session["order_state"]
                 saved_cart = calculate_cart_totals(row.get("customer_cart") or {})
+                log_ok("SESSION_SUPABASE_HIT", f"Session retrieved from Supabase for {clean_phone}")
                 return {
                     **default_session,
                     "order_state": saved_state,
                     "customer_cart": saved_cart
                 }
         except Exception as e:
-            logger.debug(f"Supabase fetch note: {e}")
+            log_warn("SESSION_SUPABASE_ERR", f"Supabase fetch warning for {clean_phone}: {e}")
 
+    log_db("SESSION_NEW", f"Initialized fresh session for {clean_phone}")
     return default_session
 
 def _sync_supabase_session_async(clean_phone: str, restaurant_id: str, session: dict):
@@ -287,8 +366,9 @@ def _sync_supabase_session_async(clean_phone: str, restaurant_id: str, session: 
     try:
         url = f"{SUPABASE_URL}/rest/v1/{TABLE_RESTAURANT_SESSIONS}"
         requests.post(url, headers=headers, json=payload, timeout=4)
+        log_ok("SUPABASE_SESSION_SYNC", f"Successfully synced session for {clean_phone} to Supabase")
     except Exception as e:
-        logger.debug(f"Supabase session save failed: {e}")
+        log_warn("SUPABASE_SESSION_SYNC_ERR", f"Supabase session save failed: {e}")
 
 def save_restaurant_session(phone: str, restaurant_id: str, session: dict):
     """Save customer session data to local cache immediately and sync to Supabase."""
@@ -300,6 +380,7 @@ def save_restaurant_session(phone: str, restaurant_id: str, session: dict):
     cached_sessions = _read_local_json(LOCAL_SESSIONS_PATH, {})
     cached_sessions[clean_phone] = session
     _write_local_json(LOCAL_SESSIONS_PATH, cached_sessions)
+    log_db("SESSION_CACHE_SAVE", f"Saved session locally for {clean_phone} (State: {session.get('order_state')})")
 
     # Sync to Supabase in background
     import threading
@@ -313,6 +394,7 @@ def reset_restaurant_session(phone: str, restaurant_id: str = "default_restauran
     if clean_phone in cached_sessions:
         del cached_sessions[clean_phone]
         _write_local_json(LOCAL_SESSIONS_PATH, cached_sessions)
+        log_info("SESSION_RESET_LOCAL", f"Cleared local session for {clean_phone}")
 
     if SUPABASE_URL and SUPABASE_KEY:
         for field in ["phone", "phone_number"]:
@@ -321,6 +403,7 @@ def reset_restaurant_session(phone: str, restaurant_id: str = "default_restauran
                 requests.delete(url, headers=get_supabase_headers(), timeout=5)
             except Exception:
                 pass
+        log_ok("SESSION_RESET_SUPABASE", f"Reset Supabase session for {clean_phone}")
 
     return get_restaurant_session(clean_phone, restaurant_id)
 
@@ -336,6 +419,7 @@ def save_order(restaurant_id: str, phone: str, order_data: dict) -> dict:
     if isinstance(all_orders, list):
         all_orders.append(order_data)
         _write_local_json(LOCAL_ORDERS_PATH, all_orders)
+        log_ok("ORDER_CACHE_SAVED", f"Order {order_id} cached locally for {clean_phone}")
 
     # Supabase insert
     if SUPABASE_URL and SUPABASE_KEY:
@@ -361,9 +445,10 @@ def save_order(restaurant_id: str, phone: str, order_data: dict) -> dict:
                 url = f"{SUPABASE_URL}/rest/v1/{TABLE_ORDERS}"
                 res = requests.post(url, headers=headers, json=p, timeout=5)
                 if res.status_code in (200, 201):
+                    log_ok("ORDER_SUPABASE_SAVED", f"Order {order_id} recorded in Supabase for {clean_phone}")
                     break
             except Exception as e:
-                logger.debug(f"Supabase save order attempt failed: {e}")
+                log_warn("ORDER_SUPABASE_ERR", f"Supabase save order attempt failed: {e}")
 
     return order_data
 
@@ -399,6 +484,7 @@ def save_chat_history(phone: str, restaurant_id: str, role: str, content: str):
                     break
             except Exception:
                 pass
+    log_db("CHAT_HISTORY_RECORDED", f"Logged {role} turn for {clean_phone} ({len(content)} chars)")
 
 def verify_supabase_tables() -> dict:
     """Verify Supabase connection and tables status."""
@@ -434,11 +520,14 @@ def send_whatsapp_text(restaurant_id: str, phone: str, text: str, token: str):
         "text": {"body": text}
     }
     try:
+        log_wa("SEND_TEXT_ATTEMPT", f"Sending WhatsApp text to {phone}: '{text[:60]}...'")
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         res.raise_for_status()
-        return res.json().get("messages", [{}])[0].get("id")
+        msg_id = res.json().get("messages", [{}])[0].get("id")
+        log_ok("WA_TEXT_SENT", f"WhatsApp text delivered to {phone} (msg_id: {msg_id})")
+        return msg_id
     except Exception as e:
-        logger.error(f"WhatsApp text send failed: {e}")
+        log_error("WA_TEXT_FAILED", f"WhatsApp text send failed to {phone}: {e}", exc=e)
         return None
 
 def send_whatsapp_image(restaurant_id: str, phone: str, image_url: str, caption: str, token: str):
@@ -455,11 +544,14 @@ def send_whatsapp_image(restaurant_id: str, phone: str, image_url: str, caption:
         }
     }
     try:
+        log_wa("SEND_IMAGE_ATTEMPT", f"Sending WhatsApp image/GIF to {phone} (url: {image_url})")
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         res.raise_for_status()
-        return res.json().get("messages", [{}])[0].get("id")
+        msg_id = res.json().get("messages", [{}])[0].get("id")
+        log_ok("WA_IMAGE_SENT", f"WhatsApp image delivered to {phone} (msg_id: {msg_id})")
+        return msg_id
     except Exception as e:
-        logger.error(f"WhatsApp image send failed: {e}")
+        log_error("WA_IMAGE_FAILED", f"WhatsApp image send failed to {phone}: {e}", exc=e)
         return None
 
 def send_whatsapp_buttons(restaurant_id: str, phone: str, text: str, buttons: list, token: str):
@@ -489,18 +581,22 @@ def send_whatsapp_buttons(restaurant_id: str, phone: str, text: str, buttons: li
         }
     }
     try:
+        log_wa("SEND_BUTTONS_ATTEMPT", f"Sending {len(actions[:3])} buttons to {phone}: {[a['reply']['title'] for a in actions[:3]]}")
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         res.raise_for_status()
+        log_ok("WA_BUTTONS_SENT", f"WhatsApp interactive buttons delivered to {phone}")
     except Exception as e:
-        logger.error(f"WhatsApp buttons send failed: {e}")
+        log_error("WA_BUTTONS_FAILED", f"WhatsApp buttons send failed to {phone}: {e}", exc=e)
 
 def download_audio_and_transcribe(audio_id: str, token: str) -> str:
     """Download audio voice note from WhatsApp and transcribe with Whisper."""
     url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{audio_id}"
     headers = {"Authorization": f"Bearer {token}"}
     try:
+        log_wa("AUDIO_DOWNLOAD", f"Downloading voice note {audio_id} from Meta...")
         res = requests.get(url, headers=headers, timeout=10)
         if res.status_code != 200:
+            log_error("AUDIO_DOWNLOAD_FAIL", f"Meta audio lookup returned HTTP {res.status_code}")
             return None
         media_url = res.json().get("url")
         media_res = requests.get(media_url, headers=headers, timeout=15)
@@ -508,21 +604,28 @@ def download_audio_and_transcribe(audio_id: str, token: str) -> str:
         file_path = os.path.join(os.path.dirname(__file__), f"temp_{audio_id}.ogg")
         with open(file_path, "wb") as f:
             f.write(media_res.content)
+        log_ok("AUDIO_DOWNLOAD_OK", f"Downloaded {len(media_res.content)} bytes to {file_path}")
 
         if groq_client:
+            log_llm("WHISPER_START", f"Transcribing audio {audio_id} via Whisper-large-v3...")
+            t0 = time.time()
             with open(file_path, "rb") as file:
                 transcription = groq_client.audio.transcriptions.create(
                     file=(file_path, file.read()),
                     model="whisper-large-v3",
                     prompt="Urdu and English restaurant food order transcription"
                 )
+            elapsed = time.time() - t0
             try:
                 os.remove(file_path)
             except Exception:
                 pass
-            return transcription.text
+            text_result = transcription.text.strip()
+            log_ok("WHISPER_SUCCESS", f"Audio transcribed in {elapsed:.2f}s: '{text_result}'")
+            return text_result
     except Exception as e:
-        logger.error(f"Audio transcription failed: {e}")
+        log_error("AUDIO_TRANSCRIPTION_FAILED", f"Voice note transcription failed: {e}", exc=e)
+    return None
     return None
 
 # =========================================================================================
@@ -590,9 +693,8 @@ def chat_completion_fallback(messages: list) -> str:
     Multi-tier LLM failover architecture:
     Tier 1: OpenRouter (fast, reliable gpt-4o-mini)
     Tier 2: Groq (high-speed LLaMA/Qwen)
-    Tier 3: Gemini (gemini-2.0-flash)
-    Tier 4: OpenAI direct
-    Tier 5: Cohere / Kilo
+    Tier 3: Gemini (gemini-2.0-flash / gemini-3.6-flash)
+    Logs every LLM call, token usage, latency, and failovers.
     """
     messages = _trim_messages(messages)
 
@@ -600,8 +702,9 @@ def chat_completion_fallback(messages: list) -> str:
     if OPENROUTER_KEYS:
         for idx, key in enumerate(OPENROUTER_KEYS, 1):
             for model_name in ["openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"]:
+                t0 = time.time()
                 try:
-                    logger.info(f"🔄 [T1-OpenRouter] Key{idx} -> {model_name}")
+                    log_llm("T1_OPENROUTER_CALL", f"Key{idx} calling {model_name}...")
                     res = requests.post(
                         "https://openrouter.ai/api/v1/chat/completions",
                         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
@@ -613,19 +716,25 @@ def chat_completion_fallback(messages: list) -> str:
                         },
                         timeout=12
                     )
+                    elapsed = time.time() - t0
                     if res.status_code == 200:
                         content = res.json()["choices"][0]["message"]["content"]
                         if content:
+                            log_ok("T1_OPENROUTER_OK", f"Model {model_name} responded in {elapsed:.2f}s ({len(content)} chars)")
                             return content
+                    else:
+                        log_warn("T1_OPENROUTER_FAIL", f"HTTP {res.status_code} from {model_name} in {elapsed:.2f}s: {res.text[:120]}")
                 except Exception as e:
-                    logger.warning(f"⚠️ [T1-OpenRouter] Key{idx} exception: {e}")
+                    elapsed = time.time() - t0
+                    log_warn("T1_OPENROUTER_ERR", f"Key{idx} on {model_name} failed in {elapsed:.2f}s: {e}")
 
     # TIER 2: Groq
     if GROQ_CLIENTS:
         for idx, client in enumerate(GROQ_CLIENTS, 1):
             for model_name in ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]:
+                t0 = time.time()
                 try:
-                    logger.info(f"🔄 [T2-Groq] Key{idx} -> {model_name}")
+                    log_llm("T2_GROQ_CALL", f"Key{idx} calling {model_name}...")
                     completion = client.chat.completions.create(
                         messages=messages,
                         model=model_name,
@@ -633,17 +742,21 @@ def chat_completion_fallback(messages: list) -> str:
                         response_format={"type": "json_object"},
                         timeout=10
                     )
+                    elapsed = time.time() - t0
                     content = completion.choices[0].message.content
                     if content:
+                        log_ok("T2_GROQ_OK", f"Model {model_name} responded in {elapsed:.2f}s ({len(content)} chars)")
                         return content
                 except Exception as e:
-                    logger.warning(f"⚠️ [T2-Groq] Key{idx} on {model_name}: {e}")
+                    elapsed = time.time() - t0
+                    log_warn("T2_GROQ_ERR", f"Key{idx} on {model_name} failed in {elapsed:.2f}s: {e}")
 
     # TIER 3: Gemini
     if GEMINI_KEYS:
         for idx, gem_key in enumerate(GEMINI_KEYS, 1):
+            t0 = time.time()
             try:
-                logger.info(f"🔄 [T3-Gemini] Key{idx} -> gemini-3.6-flash")
+                log_llm("T3_GEMINI_CALL", f"Key{idx} calling gemini-3.6-flash...")
                 res = requests.post(
                     f"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions?key={gem_key}",
                     json={
@@ -654,12 +767,19 @@ def chat_completion_fallback(messages: list) -> str:
                     },
                     timeout=12
                 )
+                elapsed = time.time() - t0
                 if res.status_code == 200:
-                    return res.json()["choices"][0]["message"]["content"]
+                    content = res.json()["choices"][0]["message"]["content"]
+                    if content:
+                        log_ok("T3_GEMINI_OK", f"Gemini responded in {elapsed:.2f}s ({len(content)} chars)")
+                        return content
+                else:
+                    log_warn("T3_GEMINI_FAIL", f"HTTP {res.status_code} in {elapsed:.2f}s: {res.text[:120]}")
             except Exception as e:
-                logger.warning(f"⚠️ [T3-Gemini] Key{idx} exception: {e}")
+                elapsed = time.time() - t0
+                log_warn("T3_GEMINI_ERR", f"Key{idx} exception in {elapsed:.2f}s: {e}")
 
-    logger.warning("All online LLMs timed out or unavailable. Activating Rule-Based Engine.")
+    log_error("ALL_LLMS_EXHAUSTED", "All online LLM tiers timed out or failed. Activating deterministic rule-based taker.")
     return ""
 
 # =========================================================================================
@@ -669,16 +789,44 @@ def format_menu_text() -> str:
     """Format official restaurant menu into a WhatsApp-friendly card directly from menu.json."""
     return menu_manager.get_whatsapp_menu_text()
 
+def can_confirm_order(cart: dict, details: dict) -> tuple:
+    """
+    Strict server-side gatekeeper: Order CANNOT be confirmed unless:
+    1. Cart has items (items count > 0)
+    2. Delivery address is provided and at least 5 chars
+    3. Customer name is provided and at least 2 chars
+    4. Payment method is chosen (Cash on Delivery or Online Transfer)
+    Returns: (can_confirm: bool, prompt_text: str, buttons: list)
+    """
+    items = cart.get("items", []) if isinstance(cart, dict) else []
+    if not items:
+        return False, "Aapka cart abhi bilkul khali hai ustaad! 🛒 Pehle menu mein se kuch garma garam pasand karein:", ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+    
+    addr = str(details.get("delivery_address") or "").strip()
+    if len(addr) < 5:
+        return False, "📍 Rider ko aapke ghar pohnchane ke liye apna *Mukammal Delivery Address* share karein (House/Flat #, Gali, Area):", []
+        
+    name = str(details.get("customer_name") or "").strip()
+    if len(name) < 2:
+        return False, "Rider ki asani ke liye baraye meharbani apna *Pura Naam* bata dein 👤", []
+        
+    pm = str(details.get("payment_method") or "").strip()
+    if not pm:
+        return False, "Payment method select karein: Cash on Delivery ya Online Transfer? 💳", ["Cash on Delivery 💵", "Online Transfer 💳"]
+        
+    return True, "", []
+
 def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
     """
     Deterministic state machine and rule-based order taker.
     Ensures 100% reliable cart building, calculations, and checkout transitions,
-    dynamically synchronized with menu.json.
+    dynamically synchronized with menu.json with funny, charming street-smart Roman Urdu tone.
     """
     msg_lower = msg.lower().strip()
     current_state = session.get("order_state", OrderState.BROWSING_MENU)
     cart = calculate_cart_totals(session.get("customer_cart", {}))
     details = session.get("customer_details", {})
+    r_name = menu_manager.get_restaurant_name()
 
     # Reset trigger
     if msg_lower in ["/reset", "reset", "clear"]:
@@ -686,16 +834,15 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
         new_session = reset_restaurant_session(phone)
         session.clear()
         session.update(new_session)
-        r_name = menu_manager.get_restaurant_name()
         return {
-            "reply_text": f"🔄 *Session Reset!* Khush amdeed {r_name} mein! 🍔 Aap kya order karna chahein ge?",
+            "reply_text": f"🔄 *Session Reset!* Khush amdeed {r_name} mein ustaad! 🍔 Aaj kya khane ka mood ban raha hai?",
             "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Biryani 🍗"],
             "order_state": OrderState.BROWSING_MENU,
             "cart": calculate_cart_totals({})
         }
 
     # Explicit menu trigger
-    if btn_id == "btn_view_menu" or any(w in msg_lower for w in ["menu", "list", "kya hai", "items", "kya mil"]):
+    if btn_id == "btn_view_menu" or any(w in msg_lower for w in ["menu", "list", "kya hai", "items", "kya mil", "kya hai menu"]):
         return {
             "reply_text": format_menu_text(),
             "buttons": ["Crispy Zinger 🍔", "Biryani 🍗", "Loaded Fries 🍟"],
@@ -704,18 +851,18 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
         }
 
     # Checkout trigger
-    if btn_id == "btn_checkout" or any(w in msg_lower for w in ["checkout", "finalize", "bill", "check out", "order confirm"]):
+    if btn_id == "btn_checkout" or any(w in msg_lower for w in ["checkout", "finalize", "bill", "check out"]):
         if not cart["items"]:
             return {
-                "reply_text": "Aapka cart abhi khali hai! 🛒 Pehle menu mein se kuch pasand karein:",
+                "reply_text": "Aapka cart abhi bilkul khali hai jani! 🛒 Pehle menu mein se kuch lazeez pasand karein:",
                 "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"],
                 "order_state": OrderState.BROWSING_MENU,
                 "cart": cart
             }
         return {
             "reply_text": (
-                f"🛒 *Aapka Cart:* Rs. {cart['grand_total']} (Delivery Rs. {cart['delivery_fee']} shamil hai).\n\n"
-                "Order deliver karne ke liye baraye meharbani apna *Mukammal Delivery Address* share karein (House/Flat #, Street, Area) 📍"
+                f"🛒 *Aapka Total Cart:* Rs. {cart['grand_total']} (Delivery Rs. {cart['delivery_fee']} shamil hai).\n\n"
+                "Rider ko aapke ghar pohnchane ke liye apna *Mukammal Delivery Address* share karein (House/Flat #, Gali, Area) 📍"
             ),
             "buttons": [],
             "order_state": OrderState.COLLECTING_DETAILS,
@@ -733,9 +880,9 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
     if added_items:
         items_str = ", ".join(added_items)
         reply = (
-            f"✅ Zabardast! *{items_str}* aapke cart mein add kar diya gaya hai! 🛒\n\n"
+            f"✅ Wah ustaad! *{items_str}* cart mein dal diya hai! 🛒🤤\n\n"
             f"💰 *Current Total:* Rs. {cart['subtotal']} (+ Rs. {cart['delivery_fee']} delivery = *Rs. {cart['grand_total']}*)\n\n"
-            "Kya aap mazeed kuch shamil karna chahein ge ya Checkout karein?"
+            "Aur kuch shamil karna hai jani, ya seedha Checkout karein?"
         )
         return {
             "reply_text": reply,
@@ -750,7 +897,7 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
             details["delivery_address"] = msg.strip()
             session["customer_details"] = details
             return {
-                "reply_text": "📍 Address note ho gaya! Baraye meharbani rider ki asani ke liye apna *Pura Naam* bata dein.",
+                "reply_text": "📍 Address note ho gaya ustaad! Rider ki asani ke liye apna *Pura Naam* bata dein 👤",
                 "buttons": [],
                 "order_state": OrderState.COLLECTING_DETAILS,
                 "cart": cart
@@ -760,7 +907,7 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
             session["customer_details"] = details
             return {
                 "reply_text": (
-                    f"Shukriya *{details['customer_name']}* sahib! 🤝\n"
+                    f"Shukriya *{details['customer_name']}* bhai! 🤝\n"
                     "Payment method select karein: Cash on Delivery ya Online Transfer?"
                 ),
                 "buttons": ["Cash on Delivery 💵", "Online Transfer 💳"],
@@ -774,7 +921,7 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
 
             item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in cart["items"]])
             summary = (
-                f"📋 *Order Summary:*\n"
+                f"📋 *Order Summary Tayar Hai Ustaad:*\n"
                 f"{item_lines}\n\n"
                 f"Subtotal: Rs. {cart['subtotal']}\n"
                 f"Delivery Fee: Rs. {cart['delivery_fee']}\n"
@@ -782,7 +929,7 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
                 f"👤 Name: {details['customer_name']}\n"
                 f"📍 Address: {details['delivery_address']}\n"
                 f"💳 Payment: {details['payment_method']}\n\n"
-                "Kya main yeh order confirm kar dun?"
+                "Ustaad kya main yeh order final kitchen ko bhej du? Confirm karein! 👨‍🍳🔥"
             )
             return {
                 "reply_text": summary,
@@ -791,42 +938,64 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
                 "cart": cart
             }
 
-    # Handling Confirmation
-    if any(w in msg_lower for w in ["confirm", "haan", "yes", "theek hai", "ok", "kardo", "done"]):
-        if cart["items"]:
-            order_id = f"ORD-{int(time.time())}"
-            order_summary = {
-                "order_id": order_id,
-                "cart": cart,
-                "customer": details,
-                "status": "PREPARING",
-                "timestamp": time.time()
-            }
-            save_order(
-                restaurant_id=session.get("restaurant_id", "default_restaurant"),
-                phone=session.get("phone_number", "+923001112233"),
-                order_data=order_summary
-            )
-            reply = (
-                f"🎉 *Order Confirm Ho Gaya!*\n\n"
-                f"Order ID: *{order_id}*\n"
-                f"Status: *Kitchen mein tayari shuru hai* 👨‍🍳\n"
-                f"Estimated Delivery: *30-40 Minutes* 🛵\n\n"
-                f"*{RESTAURANT_NAME}* ka intekhab karne ka shukriya! Aapka rider jald pohnch raha hai."
-            )
+    # Handling Confirmation (Strict Non-Premature Gatekeeper)
+    is_confirm_signal = (
+        btn_id in ["btn_confirm", "btn_haan_confirm_karein", "btn_haan,_confirm_karein_"] or
+        any(w in msg_lower for w in ["confirm", "order confirm", "haan confirm", "yes confirm", "haan kardo", "done confirm", "haan, confirm"])
+    )
+    if is_confirm_signal:
+        can_confirm, missing_msg, missing_btns = can_confirm_order(cart, details)
+        if not can_confirm:
             return {
-                "reply_text": reply,
-                "buttons": ["Track Order 🛵", "Naya Order 🍔"],
-                "order_state": OrderState.ORDER_CONFIRMED,
+                "reply_text": missing_msg,
+                "buttons": missing_btns,
+                "order_state": OrderState.COLLECTING_DETAILS,
                 "cart": cart
             }
+        
+        # All 4 conditions met! Finalize order!
+        order_id = f"ORD-{int(time.time())}"
+        order_summary = {
+            "order_id": order_id,
+            "cart": cart,
+            "customer": details,
+            "status": "PREPARING",
+            "timestamp": time.time()
+        }
+        save_order(
+            restaurant_id=session.get("restaurant_id", "default_restaurant"),
+            phone=session.get("phone_number", "+923001112233"),
+            order_data=order_summary
+        )
+        reply = (
+            f"🎉 *ORDER CONFIRMED! BHOOM!* 🚀🍔\n\n"
+            f"Order ID: *{order_id}*\n"
+            f"Status: *Kitchen mein aag lag chuki hai aur khana tayar ho raha hai!* 🔥👨‍🍳\n"
+            f"Estimated Delivery: *30-40 Minutes* 🛵\n\n"
+            f"Bawarchi Bhai kehta hai: *Speed se delivery pohnche gi ustaad!* 😎\n"
+            f"*{RESTAURANT_NAME}* ka intekhab karne ka shukriya! Rider nikalte hi aap ko WhatsApp par live update mil jayegi."
+        )
+        return {
+            "reply_text": reply,
+            "buttons": ["Track Order 🛵", "Naya Order 🍔"],
+            "order_state": OrderState.ORDER_CONFIRMED,
+            "cart": cart,
+            "media_url": SPEED_OK_GIF_URL
+        }
 
-    # General Greeting / Default Inquiry
-    greeting_reply = (
-        f"Assalam-o-Alaikum! 🍔 *{RESTAURANT_NAME}* mein khush amdeed!\n"
-        "Humare paas behtareen Crispy Zingers, Chicken Biryani, Loaded Fries aur Drinks dastiyab hain.\n\n"
-        "Aap kya khana pasand karein ge?"
-    )
+    # General Greeting / Default Inquiry (Personalized for returning customers!)
+    saved_name = details.get("customer_name")
+    if saved_name:
+        greeting_reply = (
+            f"Assalam-o-Alaikum *{saved_name}* bhai! 🍔 Wapis dekh kar dil khush hua!\n"
+            "Aaj kya khane ka program hai? Wahi Crispy Zinger mangwayein ya koi naya item try karein ge? 🤤"
+        )
+    else:
+        greeting_reply = (
+            f"Assalam-o-Alaikum ustaad! 🍔 *{RESTAURANT_NAME}* mein khush amdeed!\n"
+            "Humare paas behtareen Crispy Zingers, Chicken Biryani, Loaded Fries aur Chilled Drinks dastiyab hain.\n\n"
+            "Aap kya khana pasand karein ge jani?"
+        )
     return {
         "reply_text": greeting_reply,
         "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Chicken Biryani 🍗"],
@@ -849,58 +1018,199 @@ def process_customer_message(
     """
     clean_phone = phone.strip()
     msg_body = (incoming_message or "").strip()
+    msg_lower = msg_body.lower().strip()
+
+    log_info("MSG_RECEIVE", f"Incoming message from {clean_phone} (btn_id: {btn_id}): '{msg_body}'")
 
     # Fast-path for reset
-    if msg_body.lower() == "/reset" or btn_id == "btn_reset":
+    if msg_lower in ["/reset", "reset", "clear"] or btn_id == "btn_reset":
+        log_info("SESSION_RESET", f"Customer {clean_phone} requested session reset")
         session = reset_restaurant_session(clean_phone, restaurant_id)
-        reply = f"🔄 *Session Reset!* Khush amdeed {RESTAURANT_NAME} mein! 🍔 Aap kya order karna chahein ge?"
+        reply = f"🔄 *Session Reset!* Khush amdeed {RESTAURANT_NAME} mein ustaad! 🍔 Aaj kya khane ka program hai?"
         buttons = ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Chicken Biryani 🍗"]
         session["chat_history"].append({"role": "assistant", "content": reply})
         save_restaurant_session(clean_phone, restaurant_id, session)
+        log_ok("SESSION_RESET_DONE", f"Session wiped clean and reset greeting returned to {clean_phone}")
         return {
             "reply_text": reply,
             "buttons": buttons,
             "order_state": OrderState.BROWSING_MENU,
             "customer_cart": calculate_cart_totals({}),
-            "customer_details": session["customer_details"]
+            "customer_details": session["customer_details"],
+            "media_url": None
         }
-
-    # Sanitize profanity
-    cleaned_body, had_abuse = sanitize_and_extract(msg_body)
-    if had_abuse:
-        return {
-            "reply_text": "Baraye meharbani munasib alfaz ka istemal karein. Hum ek restaurant food ordering service hain 🍔.",
-            "buttons": ["Menu Dekhein 📋"],
-            "order_state": OrderState.BROWSING_MENU,
-            "customer_cart": calculate_cart_totals({}),
-            "customer_details": {}
-        }
-    msg_body = cleaned_body
 
     # Fetch active session
     session = get_restaurant_session(clean_phone, restaurant_id)
+    current_lang = session.get("current_language", "Roman Urdu")
+    pending_lang = session.get("pending_language", None)
     chat_hist = session.get("chat_history", [])
     cart = calculate_cart_totals(session.get("customer_cart", {}))
     details = session.get("customer_details", {})
+
+    # 1. Smart Language Switch Confirmation Check ('1' or Switch Button)
+    if pending_lang and is_smart_language_confirmation(msg_body, btn_id, session):
+        target_conf = LANGUAGES_CONFIG.get(pending_lang, {})
+        session["current_language"] = pending_lang
+        session["pending_language"] = None
+        welcome_text = target_conf.get("locked_welcome", f"Zabardast! Ab hum {pending_lang} mein baat karein ge! 🍔")
+        btn_label = "Menu 📋" if pending_lang != "Roman_Urdu" else "Menu Dekhein 📋"
+        switch_buttons = [btn_label, "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+
+        log_ok("LANG_SWITCH_LOCKED", f"Customer {clean_phone} locked language to '{pending_lang}'")
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": welcome_text})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+        save_chat_history(clean_phone, restaurant_id, "assistant", welcome_text)
+        return {
+            "reply_text": welcome_text,
+            "buttons": switch_buttons,
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
+            "customer_details": details,
+            "media_url": None,
+            "current_language": pending_lang
+        }
+
+    # 2. Admin / Free Food / Zero-Payment Hack Blocker (Code Intercept, 0 LLM Tokens)
+    admin_hack_patterns = [
+        "admin hu", "admin hoon", "mein admin", "main admin", "owner hu", "malik hu", "restaurant ka malik",
+        "developer hu", "zero payment", "payment zero", "payment 0", "free order", "free food", "muft khana",
+        "muft do", "bina paise", "baghair paise", "free mein", "100% discount", "discount 100", "bypass payment",
+        "i am admin", "i am the admin", "i am owner", "make payment zero", "make order free", "free meal"
+    ]
+    if any(p in msg_lower for p in admin_hack_patterns):
+        log_security("ADMIN_HACK_INTERCEPTED", f"Blocked admin/zero-payment bypass attempt from {clean_phone}: '{msg_body}'")
+        if current_lang == "English" and not any(w in msg_lower for w in ["hu", "hoon", "mein", "main", "malik", "karo", "do"]):
+            witty_reply = (
+                "Haha nice try! Even if you are the owner or the ultimate VIP, the kitchen system doesn't cook without payment! 😜\n\n"
+                "Here every customer is royalty, and every bite is delicious! What mouth-watering food are we getting for you today? 🍔🤤"
+            )
+            buttons = ["Menu 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+        else:
+            witty_reply = (
+                "Haha ustaad, agar aap restaurant ke malik ya dunya ke sab se bare VIP bhi hain na, "
+                "tab bhi yeh software payment ke baghair kitchen ko order nahi bhejta! 😜\n\n"
+                "Yahan har customer hamare liye VIP hai aur har bite lazeez! "
+                "Chalein shabash, seedhe tareeqay se batayein kya khana hai? 🍔🤤"
+            )
+            buttons = ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": witty_reply})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+        save_chat_history(clean_phone, restaurant_id, "assistant", witty_reply)
+        return {
+            "reply_text": witty_reply,
+            "buttons": buttons,
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
+            "customer_details": details,
+            "media_url": None,
+            "current_language": current_lang
+        }
+
+    # 3. Abuse / Profanity Sanitization (Preserve Cart & Memory, Deflect with Food Humor)
+    cleaned_body, had_abuse = sanitize_and_extract(msg_body)
+    if had_abuse:
+        log_warn("ABUSE_SANITIZED", f"Sanitized abusive language from {clean_phone}. Preserving cart ({len(cart['items'])} items) and deflecting with food humor.")
+        cooling_reply = (
+            "Array ustaad itna ghussa? 😅 Lagta hai bhook bohat tez lagi hai aur dimagh ki batti gul ho rahi hai!\n\n"
+            "Ghussa thanda karein, ek garam Crispy Zinger 🍔 ya chilled Mint Margarita 🥤 mangwayein, "
+            "tabiyat ek dam fresh ho jayegi! Bataiye kya pack karein? 🤤"
+        )
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": cooling_reply})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+        save_chat_history(clean_phone, restaurant_id, "assistant", cooling_reply)
+        return {
+            "reply_text": cooling_reply,
+            "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"],
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
+            "customer_details": details,
+            "media_url": None,
+            "current_language": current_lang
+        }
+    msg_body = cleaned_body
+
+    # 4. Non-Food Off-Topic Fast Interception (Politics, Coding, Math, Homework)
+    off_topic_patterns = [
+        "who is prime minister", "imran khan", "nawaz sharif", "write python", "write code",
+        "solve this math", "do my homework", "who won the match", "write an essay", "write poem",
+        "tell me a joke about politics", "crypto", "bitcoin", "weather forecast"
+    ]
+    if any(p in msg_lower for p in off_topic_patterns):
+        log_info("OFF_TOPIC_DEFLECTED", f"Deflected non-food question from {clean_phone}: '{msg_body}'")
+        deflect_reply = (
+            "Ustaad humara dimagh sirf Crispy Burgers, Chicken Biryani aur Loaded Fries mein chalta hai! 🍔🤤\n\n"
+            "Siyasat, coding aur homework chhoro, pehle pait pooja karein! "
+            "Bataiye aaj kya lazeez mangwa rahe hain? 🍟🥤"
+        )
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": deflect_reply})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+        save_chat_history(clean_phone, restaurant_id, "assistant", deflect_reply)
+        return {
+            "reply_text": deflect_reply,
+            "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"],
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
+            "customer_details": details,
+            "media_url": None,
+            "current_language": current_lang
+        }
+
+    # 5. Smart Language Detection for Foreign Language
+    detected_foreign = detect_foreign_language(msg_body, current_lang)
+    if detected_foreign and detected_foreign != current_lang:
+        offer_text, offer_btns = build_language_switch_offer(detected_foreign)
+        if offer_text:
+            log_info("LANG_OFFER_DISPATCHED", f"Detected foreign language '{detected_foreign}' from {clean_phone}. Dispatched switch offer.")
+            session["pending_language"] = detected_foreign
+            chat_hist.append({"role": "user", "content": msg_body})
+            chat_hist.append({"role": "assistant", "content": offer_text})
+            session["chat_history"] = chat_hist[-20:]
+            save_restaurant_session(clean_phone, restaurant_id, session)
+            save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+            save_chat_history(clean_phone, restaurant_id, "assistant", offer_text)
+            return {
+                "reply_text": offer_text,
+                "buttons": offer_btns,
+                "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+                "customer_cart": cart,
+                "customer_details": details,
+                "media_url": None,
+                "current_language": current_lang
+            }
 
     # Build AI context
     current_context = {
         "order_state": session.get("order_state", OrderState.BROWSING_MENU),
         "customer_cart": cart,
-        "customer_details": details
+        "customer_details": details,
+        "current_language": current_lang
     }
 
     ai_reply_text = ""
     ai_buttons = []
     next_state = session.get("order_state", OrderState.BROWSING_MENU)
 
-    # 1. Fast path for pure menu view requests (0ms latency, zero token cost)
-    msg_lower = msg_body.lower().strip()
+    # 6. Fast path for pure menu view requests (0ms latency, zero token cost)
     is_pure_menu_inquiry = (btn_id == "btn_view_menu") or (
         any(w in msg_lower for w in ["menu", "list dikhao", "kya items", "kya mil", "show menu"])
         and not any(w in msg_lower for w in ["order", "chahiye", "bhejo", "pack", "add", "kardo", "mangwa"])
     )
     if is_pure_menu_inquiry:
+        log_ok("MENU_SERVED", f"Served full menu card to {clean_phone} (0 LLM tokens)")
         menu_card = menu_manager.get_whatsapp_menu_text()
         chat_hist.append({"role": "user", "content": msg_body})
         chat_hist.append({"role": "assistant", "content": menu_card})
@@ -912,11 +1222,12 @@ def process_customer_message(
             "buttons": ["Crispy Zinger 🍔", "Biryani 🍗", "Loaded Fries 🍟"],
             "order_state": OrderState.BROWSING_MENU,
             "customer_cart": cart,
-            "cart": cart
+            "cart": cart,
+            "media_url": None
         }
 
-    # 2. Try LLM Call (Dynamic System Prompt strictly memorizing live menu.json)
-    live_sys_prompt = menu_manager.get_system_prompt()
+    # 7. Dynamic LLM Call with Language Directive strictly memorizing live menu.json
+    live_sys_prompt = menu_manager.get_system_prompt(current_language=current_lang)
     sys_prompt = f"{live_sys_prompt}\nCURRENT CONTEXT: {json.dumps(current_context, ensure_ascii=False)}"
     llm_messages = [{"role": "system", "content": sys_prompt}]
     for h in chat_hist[-6:]:
@@ -938,6 +1249,7 @@ def process_customer_message(
 
         if action == "clear":
             cart = calculate_cart_totals({})
+            log_info("CART_CLEARED", f"Cart cleared for {clean_phone}")
         elif action in ["add", "update"] and items_to_update:
             for it in items_to_update:
                 raw_name = str(it.get("name", "")).strip()
@@ -958,40 +1270,100 @@ def process_customer_message(
                 )
                 if is_valid:
                     cart = add_item_to_cart(cart, val_name, val_variant, qty, val_price, notes)
+                    log_ok("PRICING_GUARD_OK", f"Added verified {qty}x {val_name} ({val_variant}) @ Rs. {val_price} to cart for {clean_phone}")
                 else:
-                    logger.warning(f"⚠️ [Pricing Guard] Rejected invalid/hallucinated item: '{raw_name}'")
+                    log_warn("PRICING_GUARD_REJECT", f"Rejected invalid/hallucinated item '{raw_name}' for {clean_phone}")
 
         # Apply customer details updates
         details_updates = parsed.get("customer_details_updates", {})
         for k in ["customer_name", "delivery_address", "payment_method"]:
             if details_updates.get(k):
                 details[k] = details_updates[k]
+                log_info("CUSTOMER_DETAIL_UPDATED", f"Updated {k}='{details[k]}' for {clean_phone}")
 
-    # 2. Rule-based Fallback if AI didn't provide complete answer
+    # 8. Rule-based Fallback if AI didn't provide complete answer
+    media_url = None
     if not ai_reply_text:
+        log_info("RULE_BASED_ACTIVATED", f"AI reply empty for {clean_phone}, running rule_based_order_taker")
         rule_res = rule_based_order_taker(session, msg_body, btn_id=btn_id)
         ai_reply_text = rule_res.get("reply_text", "")
         ai_buttons = rule_res.get("buttons", [])
         next_state = rule_res.get("order_state", next_state)
         cart = rule_res.get("cart", cart)
+        media_url = rule_res.get("media_url")
 
-    # State transition & Order Confirmation Trigger
+    # 9. Strict Non-Premature Order Confirmation Gatekeeper
+    all_details_present = (
+        len(cart.get("items", [])) > 0 and
+        len(str(details.get("delivery_address") or "").strip()) >= 5 and
+        len(str(details.get("customer_name") or "").strip()) >= 2 and
+        bool(str(details.get("payment_method") or "").strip())
+    )
+
+    is_explicit_confirm = (
+        btn_id in ["btn_confirm", "btn_haan_confirm_karein", "btn_haan,_confirm_karein_"] or
+        any(w in msg_lower for w in ["confirm", "order confirm", "haan confirm", "yes confirm", "haan kardo", "done confirm", "haan, confirm", "final confirm"])
+    )
+
+    # If details just got completed but user hasn't explicitly clicked Confirm yet:
+    if all_details_present and not is_explicit_confirm:
+        next_state = OrderState.COLLECTING_DETAILS
+        item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in cart["items"]])
+        ai_reply_text = (
+            f"📋 *Order Summary Tayar Hai Ustaad:*\n"
+            f"{item_lines}\n\n"
+            f"Subtotal: Rs. {cart['subtotal']}\n"
+            f"Delivery Fee: Rs. {cart['delivery_fee']}\n"
+            f"Grand Total: *Rs. {cart['grand_total']}*\n\n"
+            f"👤 Name: {details['customer_name']}\n"
+            f"📍 Address: {details['delivery_address']}\n"
+            f"💳 Payment: {details['payment_method']}\n\n"
+            "Ustaad kya main yeh order final kitchen ko bhej du? Confirm karein! 👨‍🍳🔥"
+        )
+        ai_buttons = ["Haan, Confirm Karein ✅", "Change Order ✏️"]
+        media_url = None
+        log_info("ORDER_SUMMARY_PRESENTED", f"Presented complete order summary to {clean_phone}, awaiting explicit confirmation")
+
+    elif next_state == OrderState.ORDER_CONFIRMED or is_explicit_confirm:
+        can_confirm, missing_msg, missing_btns = can_confirm_order(cart, details)
+        if not can_confirm or not is_explicit_confirm:
+            # Overrule premature confirmation!
+            log_warn("CONFIRMATION_BLOCKED", f"Blocked premature confirmation for {clean_phone}: {missing_msg or 'Needs explicit confirmation'}")
+            next_state = OrderState.COLLECTING_DETAILS
+            if missing_msg:
+                ai_reply_text = missing_msg
+                ai_buttons = missing_btns
+            media_url = None
+        else:
+            next_state = OrderState.ORDER_CONFIRMED
+            media_url = SPEED_OK_GIF_URL
+            if not session.get("active_order_id"):
+                order_id = f"ORD-{int(time.time())}"
+                session["active_order_id"] = order_id
+                session["order_status"] = "PREPARING"
+                order_data = {
+                    "order_id": order_id,
+                    "cart": cart,
+                    "customer": details,
+                    "status": "PREPARING",
+                    "timestamp": time.time()
+                }
+                save_order(restaurant_id, clean_phone, order_data)
+                ai_reply_text = (
+                    f"🎉 *ORDER CONFIRMED! BHOOM!* 🚀🍔\n\n"
+                    f"Order ID: *{order_id}*\n"
+                    f"Status: *Kitchen mein aag lag chuki hai aur burger grill ho raha hai!* 🔥👨‍🍳\n"
+                    f"Estimated Delivery: *30-40 Minutes* 🛵\n\n"
+                    f"Bawarchi Bhai kehta hai: *Speed se delivery pohnche gi ustaad!* 😎\n"
+                    f"*{RESTAURANT_NAME}* ka intekhab karne ka shukriya! Rider nikalte hi aap ko WhatsApp par live update mil jayegi."
+                )
+                ai_buttons = ["Track Order 🛵", "Naya Order 🍔"]
+                log_ok("ORDER_CONFIRMED_FINAL", f"🎉 ORDER CONFIRMED! ID={order_id}, Phone={clean_phone}, Total=Rs. {cart['grand_total']}, Attached Speed GIF")
+
+    # State transition & Update session
     session["order_state"] = next_state
     session["customer_cart"] = cart
     session["customer_details"] = details
-
-    if next_state == OrderState.ORDER_CONFIRMED and not session.get("active_order_id"):
-        order_id = f"ORD-{int(time.time())}"
-        session["active_order_id"] = order_id
-        session["order_status"] = "PREPARING"
-        order_data = {
-            "order_id": order_id,
-            "cart": cart,
-            "customer": details,
-            "status": "PREPARING",
-            "timestamp": time.time()
-        }
-        save_order(restaurant_id, clean_phone, order_data)
 
     # Update conversation history
     chat_hist.append({"role": "user", "content": msg_body})
@@ -1008,7 +1380,9 @@ def process_customer_message(
         "buttons": ai_buttons,
         "order_state": session["order_state"],
         "customer_cart": session["customer_cart"],
-        "customer_details": session["customer_details"]
+        "customer_details": session["customer_details"],
+        "media_url": media_url,
+        "current_language": session.get("current_language", "Roman Urdu")
     }
 
 # =========================================================================================
@@ -1064,35 +1438,77 @@ def process_whatsapp_data(data: dict):
             if not msg_body and not btn_id:
                 continue
 
+            log_wa("WA_MSG_INCOMING", f"Processing {msg_type} from {from_number} (msg_id: {msg_id}) | Content: '{msg_body[:60]}'")
             # Process through unified restaurant ordering engine
             result = process_customer_message(from_number, msg_body, btn_id=btn_id, restaurant_id=restaurant_id)
             reply_text = result.get("reply_text", "")
             buttons = result.get("buttons", [])
+            media_url = result.get("media_url")
 
             # Send WhatsApp response
-            if buttons:
+            if media_url:
+                send_whatsapp_image(restaurant_id, from_number, media_url, reply_text, wa_token)
+                if buttons:
+                    send_whatsapp_buttons(restaurant_id, from_number, "Mazay karein! Agla step chunein:", buttons, wa_token)
+                log_ok("WA_DELIVERED", f"Dispatched media + buttons to {from_number}")
+            elif buttons:
                 send_whatsapp_buttons(restaurant_id, from_number, reply_text, buttons, wa_token)
+                log_ok("WA_DELIVERED", f"Dispatched interactive buttons to {from_number}")
             else:
                 send_whatsapp_text(restaurant_id, from_number, reply_text, wa_token)
+                log_ok("WA_DELIVERED", f"Dispatched text response to {from_number}")
 
     except Exception as e:
-        logger.error(f"Error processing WhatsApp message: {e}", exc_info=True)
+        log_error("WA_PROCESS_EXCEPTION", f"Error in background WhatsApp processor: {e}", exc=e)
 
 # =========================================================================================
-# WEBHOOK & API ENDPOINTS
+# WEBHOOK, KEEP-ALIVE & API ENDPOINTS
 # =========================================================================================
-@app.get('/')
-def root():
-    return PlainTextResponse(content=f"{RESTAURANT_NAME} WhatsApp Bot is online!")
+@app.api_route('/', methods=['GET', 'HEAD'])
+def root(request: Request):
+    """
+    Keep-alive endpoint for cron-job.org and uptime monitors.
+    Returns 200 OK with minimal body ('OK' = 2 bytes) or 0-bytes on HEAD,
+    completely preventing cron-job.org 'Output too large' errors.
+    """
+    if request.method == "HEAD":
+        return Response(content=b"", status_code=200, media_type="text/plain")
+    return PlainTextResponse(content="OK", status_code=200)
 
-@app.get('/health')
-def health():
+@app.api_route('/ping', methods=['GET', 'HEAD'])
+def ping_endpoint(request: Request):
+    """Dedicated 2-byte ping endpoint for external cron jobs."""
+    if request.method == "HEAD":
+        return Response(content=b"", status_code=200, media_type="text/plain")
+    return PlainTextResponse(content="OK", status_code=200)
+
+@app.api_route('/keep-alive', methods=['GET', 'HEAD'])
+def keep_alive_endpoint(request: Request):
+    """Keep-alive ping endpoint to keep Render free tier awake."""
+    if request.method == "HEAD":
+        return Response(content=b"", status_code=200, media_type="text/plain")
+    return PlainTextResponse(content="OK", status_code=200)
+
+@app.api_route('/health', methods=['GET', 'HEAD'])
+def health(request: Request):
+    """Standard health check endpoint."""
+    if request.method == "HEAD":
+        return Response(content=b"", status_code=200, media_type="text/plain")
     return JSONResponse(content={
         "status": "healthy",
         "service": "restaurant-bot",
         "restaurant": RESTAURANT_NAME,
         "timestamp": time.time()
     })
+
+@app.get('/logs')
+def view_system_logs(limit: int = 150):
+    """
+    Live web log viewer.
+    Allows viewing real-time system logs directly in any web browser or via curl.
+    """
+    lines = get_recent_log_lines(limit)
+    return PlainTextResponse(content="\n".join(lines), status_code=200)
 
 @app.get('/supabase/status')
 def supabase_status_endpoint():
@@ -1105,13 +1521,16 @@ def verify_webhook(request: Request):
     verify_token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
     if verify_token == MY_VERIFY_TOKEN:
+        log_ok("WA_WEBHOOK_VERIFY", f"Webhook verification succeeded for hub.challenge={challenge}")
         return PlainTextResponse(content=str(challenge))
+    log_error("WA_WEBHOOK_VERIFY", f"Webhook verification failed with token '{verify_token}' (expected '{MY_VERIFY_TOKEN}')")
     return PlainTextResponse(content="Verification failed", status_code=403)
 
 @app.post('/webhook')
 async def receive_webhook(request: Request, bg_tasks: BackgroundTasks):
     """WhatsApp Cloud API Incoming Event Listener."""
     data = await request.json()
+    log_wa("WA_PAYLOAD_RECEIVED", f"Incoming WhatsApp webhook payload: {json.dumps(data)[:200]}...")
     bg_tasks.add_task(process_whatsapp_data, data)
     return PlainTextResponse(content="OK")
 
@@ -1135,11 +1554,13 @@ async def web_chat_endpoint(request: Request):
     restaurant_id = body.get("restaurant_id") or body.get("client_id") or "default_restaurant"
     btn_id = body.get("btn_id")
 
+    log_info("CHAT_ENDPOINT", f"Received message from {customer_id}: '{user_msg}' (btn_id: {btn_id})")
     result = process_customer_message(customer_id, user_msg, btn_id=btn_id, restaurant_id=restaurant_id)
     if "response" not in result and "reply_text" in result:
         result["response"] = result["reply_text"]
     if "cart" not in result and "customer_cart" in result:
         result["cart"] = result["customer_cart"]
+    log_ok("CHAT_ENDPOINT_RESPONSE", f"Replied to {customer_id} with state={result.get('order_state')}")
     return JSONResponse(content=result)
 
 @app.post('/reset')
@@ -1148,7 +1569,9 @@ async def reset_session_endpoint(request: Request):
     body = await request.json()
     phone = body.get("phone", "+923001112233")
     restaurant_id = body.get("restaurant_id", "default_restaurant")
+    log_info("RESET_ENDPOINT", f"Resetting session for {phone}")
     session = reset_restaurant_session(phone, restaurant_id)
+    log_ok("RESET_ENDPOINT", f"Session reset complete for {phone}")
     return JSONResponse(content={"status": "session_reset", "session": session})
 
 if __name__ == "__main__":
