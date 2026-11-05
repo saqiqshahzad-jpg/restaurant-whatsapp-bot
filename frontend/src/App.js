@@ -1,862 +1,1378 @@
 /* eslint-disable */
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import logoImg from './logo.png';
-import { Analytics } from '@vercel/analytics/react';
+import { motion, AnimatePresence } from 'framer-motion';
+import {
+  ShoppingBag,
+  Send,
+  RotateCcw,
+  Check,
+  CheckCircle2,
+  MapPin,
+  Clock,
+  Plus,
+  Minus,
+  Trash2,
+  ArrowRight,
+  ChevronRight,
+  Sun,
+  Moon,
+  MessageSquare,
+  UtensilsCrossed,
+  CreditCard,
+  Truck,
+  Sparkles,
+  Phone,
+  User,
+  ArrowLeft,
+  Share2,
+  ReceiptText
+} from 'lucide-react';
 
-// --- 🎨 GLOBAL THEME & ACCENT CONFIG ---
-const accentColors = {
-  emerald: { bg: 'bg-emerald-500', text: 'text-emerald-500', border: 'border-emerald-500', glow: 'bg-emerald-500/20' },
-  blue: { bg: 'bg-blue-500', text: 'text-blue-500', border: 'border-blue-500', glow: 'bg-blue-500/20' },
-  rose: { bg: 'bg-rose-500', text: 'text-rose-500', border: 'border-rose-500', glow: 'bg-rose-500/20' },
-};
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const DEFAULT_PHONE = '+923001112233';
 
-// API URL Live Backend
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000'; 
+// Curated luxury menu catalog with real photography
+const MENU_CATALOG = [
+  {
+    id: "zinger",
+    name: "Crispy Zinger Burger",
+    category: "Burgers",
+    image: "/images/zinger.jpg",
+    description: "Crispy fried golden chicken fillet oozing with cheddar lava cheese sauce in a freshly toasted brioche bun.",
+    basePrice: 550,
+    badge: "Bestseller 🔥",
+    variants: [
+      { name: "Regular", price: 550 },
+      { name: "Cheese Lava", price: 650 }
+    ]
+  },
+  {
+    id: "biryani",
+    name: "Special Chicken Biryani",
+    category: "Rice",
+    image: "/images/biryani.jpg",
+    description: "Royal fragrant long-grain basmati rice cooked in artisanal clay pot with tender spices and chicken leg.",
+    basePrice: 400,
+    badge: "Chef Special 👑",
+    variants: [
+      { name: "Single Mild", price: 400 },
+      { name: "Single Spicy", price: 400 },
+      { name: "Double Mild", price: 750 },
+      { name: "Double Spicy", price: 750 }
+    ]
+  },
+  {
+    id: "fries",
+    name: "Loaded Fries",
+    category: "Sides",
+    image: "/images/fries.jpg",
+    description: "Golden potato french fries layered with bubbling melted cheese, garlic mayo, and spicy jalapeno slices.",
+    basePrice: 450,
+    badge: "Crispy 🧀",
+    variants: [
+      { name: "Mayo Garlic", price: 450 },
+      { name: "Jalapeno Cheese", price: 450 }
+    ]
+  },
+  {
+    id: "margarita",
+    name: "Mint Margarita",
+    category: "Drinks",
+    image: "/images/margarita.jpg",
+    description: "Chilled electric mint cooler with fresh crushed garden mint leaves, ice crystals, and lime wheel garnish.",
+    basePrice: 150,
+    badge: "Chilled ❄️",
+    variants: [
+      { name: "Regular", price: 150 }
+    ]
+  }
+];
 
 export default function App() {
-  // --- 🧠 AUTH STATES ---
-  const [user, setUser] = useState(null);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authMode, setAuthMode] = useState('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [otp, setOtp] = useState('');
-  const [authError, setAuthError] = useState('');
-  const [authSuccess, setAuthSuccess] = useState('');
-  const [authLoading, setAuthLoading] = useState(false);
+  // Theme state: default is PREMIUM WHITE (isDark = false)
+  const [isDark, setIsDark] = useState(() => {
+    return localStorage.getItem('theme_mode') === 'dark';
+  });
 
-  // --- 📱 MOBILE STATE ---
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Navigation pages: 'menu' | 'chat' | 'cart' | 'checkout' | 'success'
+  const [activePage, setActivePage] = useState('menu');
 
-  // --- 🧠 PASSWORD VALIDATION ---
-  const pwdReqs = {
-    length: password.length >= 8,
-    uppercase: /[A-Z]/.test(password),
-    number: /[0-9]/.test(password),
-    special: /[^A-Za-z0-9]/.test(password)
-  };
-  const isPasswordValid = pwdReqs.length && pwdReqs.uppercase && pwdReqs.number && pwdReqs.special;
+  // Menu category filter
+  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [menuCatalog, setMenuCatalog] = useState(MENU_CATALOG);
 
-  // --- 🧠 CHAT STATES ---
-  const defaultWelcomeMessage = { role: 'ai', text: "Hi! Welcome to our Restaurant Food Ordering Service! 🍔🍕 Browse our menu, customize your order, or check your cart to get started. How can I assist you today?", id: 1 };
-  
-  const [messages, setMessages] = useState([defaultWelcomeMessage]);
-  const [input, setInput] = useState('');
-  const [chatHistory, setChatHistory] = useState([]);
-  const [activeChatId, setActiveChatId] = useState(null);
-  
-  const [isTempChat, setIsTempChat] = useState(false);
-  const [showTempDisclaimer, setShowTempDisclaimer] = useState(false);
-  const [showProfileSettings, setShowProfileSettings] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  
-  // 📎 FILE ATTACHMENT STATE
-  const [attachedFileData, setAttachedFileData] = useState(null);
-  const [attachedFileName, setAttachedFileName] = useState("");
-
-  // 🌓 THEME STATES
-  const [isDarkMode, setIsDarkMode] = useState(true);
-  const [selectedAccent, setSelectedAccent] = useState('blue');
-
-  const chatContainerRef = useRef(null);
-  const textareaRef = useRef(null);
-  const fileInputRef = useRef(null);
-
-  // --- 💾 INIT ---
+  // Fetch live menu dynamically from backend
   useEffect(() => {
-    const savedUser = localStorage.getItem('al_elite_user_final3');
-    if (savedUser) setUser(JSON.parse(savedUser));
-
-    const savedData = JSON.parse(localStorage.getItem('restaurant_order_chat_data')) || {};
-    setChatHistory(savedData.history || []);
-    if(savedData.accent) setSelectedAccent(savedData.accent);
-    if(savedData.isDarkMode !== undefined) setIsDarkMode(savedData.isDarkMode);
+    fetch(`${API_URL}/menu`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.items && data.items.length > 0) {
+          setMenuCatalog(data.items);
+        }
+      })
+      .catch(err => console.log('Using default menu catalog fallback:', err));
   }, []);
 
+  // Cart state: items array
+  const [cartItems, setCartItems] = useState([
+    {
+      id: 'zinger',
+      name: 'Crispy Zinger Burger',
+      variant: 'Cheese Lava',
+      price: 650,
+      qty: 1,
+      image: '/images/zinger.jpg'
+    }
+  ]);
+
+  // Selected variants for each menu card
+  const [selectedVariants, setSelectedVariants] = useState({
+    zinger: 'Cheese Lava',
+    biryani: 'Single Spicy',
+    fries: 'Mayo Garlic',
+    margarita: 'Regular'
+  });
+
+  // Customer Checkout Details
+  const [customerDetails, setCustomerDetails] = useState({
+    name: 'Saqiq Shahzad',
+    phone: DEFAULT_PHONE,
+    address: 'House #42, Street 7, Phase 5, DHA, Karachi',
+    notes: 'Please bring hot and crispy. Ring bell twice.',
+    paymentMethod: 'Cash on Delivery (COD)'
+  });
+
+  // Confirmed Order Data (for Dopamine Success Page)
+  const [confirmedOrder, setConfirmedOrder] = useState(null);
+
+  // Chat conversation state
+  const [chatMessages, setChatMessages] = useState([
+    {
+      id: 1,
+      role: 'ai',
+      text: "Assalam-o-Alaikum! **Zaiqa Grill & Fast Food** mein khush amdeed 🍔🍕\n\nAap yahan direct food order kar sakte hain. Bataiye aaj kya khana pasand karein ge?",
+      buttons: ["Crispy Zinger 🍔", "Special Biryani 🍗", "Loaded Fries 🍟", "Cart Dekhao 🛒"],
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isAiTyping, setIsAiTyping] = useState(false);
+
+  // Toast notification
+  const [toastText, setToastText] = useState(null);
+
+  // Countdown timer for confirmed order
+  const [countdownSeconds, setCountdownSeconds] = useState(35 * 60);
+
+  const chatEndRef = useRef(null);
+
+  // Handle Theme Switcher
   useEffect(() => {
-    if (user && !isTempChat) {
-      localStorage.setItem('restaurant_order_chat_data', JSON.stringify({
-        history: chatHistory,
-        accent: selectedAccent,
-        isDarkMode: isDarkMode
-      }));
-    }
-  }, [chatHistory, selectedAccent, isDarkMode, user, isTempChat]);
-
-  const scrollToBottom = () => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTo({
-        top: chatContainerRef.current.scrollHeight,
-        behavior: 'smooth'
-      });
-    }
-  };
-
-  useEffect(() => {
-    const timer = setTimeout(scrollToBottom, 100);
-    return () => clearTimeout(timer);
-  }, [messages, isTyping, attachedFileName]);
-
-  // --- 📎 FILE HANDLING PROTOCOL ---
-  const handleFileChange = (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-
-      if (file.size > 5 * 1024 * 1024) {
-          alert("File is too large. Max size is 5MB.");
-          return;
-      }
-
-      setAttachedFileName(file.name);
-      const reader = new FileReader();
-      
-      reader.onload = (event) => {
-          setAttachedFileData(event.target.result);
-      };
-      
-      if(file.type.includes('text') || file.type.includes('json') || file.name.endsWith('.csv')) {
-          reader.readAsText(file);
-      } else {
-          reader.readAsDataURL(file); 
-      }
-  };
-
-  const removeAttachment = () => {
-      setAttachedFileData(null);
-      setAttachedFileName("");
-      if(fileInputRef.current) fileInputRef.current.value = "";
-  };
-
-  // --- 🔐 AUTH LOGIC ---
-  const handleAuth = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    setAuthSuccess('');
-    
-    if ((authMode === 'signup' || authMode === 'reset') && !isPasswordValid) {
-        setAuthError("Please meet all password requirements.");
-        return;
-    }
-
-    setAuthLoading(true);
-
-    try {
-      if (authMode === 'signup') {
-        const res = await fetch(`${API_URL}/signup`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            setAuthMode('otp');
-            setAuthSuccess('✅ OTP Sent! Check your email.');
-        } else {
-            setAuthError(data.detail || "Signup failed");
-        }
-      } else if (authMode === 'otp') {
-        const res = await fetch(`${API_URL}/verify-otp`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, otp }),
-          });
-          const data = await res.json();
-          if (res.ok) {
-              setAuthMode('login');
-              setAuthSuccess('✅ Verified! Now please login.');
-              setOtp('');
-              setPassword('');
-          } else {
-              setAuthError(data.detail || "Invalid OTP");
-          }
-      } else if (authMode === 'forgot') {
-          const res = await fetch(`${API_URL}/forgot-password`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email }),
-          });
-          const data = await res.json();
-          if(res.ok) {
-              setAuthMode('reset');
-              setAuthSuccess('✅ Reset Code sent to your email.');
-          } else {
-              setAuthError(data.detail || "Email not found.");
-          }
-      } else if (authMode === 'reset') {
-          const res = await fetch(`${API_URL}/reset-password`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email, otp, new_password: password }),
-          });
-          const data = await res.json();
-          if(res.ok) {
-              setAuthMode('login');
-              setAuthSuccess('✅ Password Reset! Please login.');
-              setPassword('');
-              setOtp('');
-          } else {
-              setAuthError(data.detail || "Invalid Code.");
-          }
-      } else {
-        const res = await fetch(`${API_URL}/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
-        const data = await res.json();
-        if (res.ok) {
-            const userData = { email };
-            localStorage.setItem('al_elite_user_final3', JSON.stringify(userData));
-            
-            const savedData = JSON.parse(localStorage.getItem('restaurant_order_chat_data')) || {};
-            if (savedData.history) {
-                setChatHistory(savedData.history);
-            }
-
-            setUser(userData);
-            setShowAuthModal(false);
-            setAuthError('');
-            setAuthSuccess('');
-            setEmail('');
-            setPassword('');
-            setMessages([{ role: 'ai', text: `Welcome back, ${email.split('@')[0]}! Feel free to ask any questions.`, id: Date.now() }]);
-        } else {
-            setAuthError(data.detail || "Login failed");
-        }
-      }
-    } catch (err) {
-        setAuthError("⚠️ Connection Error. Contact the Host.");
-    }
-    setAuthLoading(false);
-  };
-
-  const logout = () => {
-      setUser(null);
-      localStorage.removeItem('al_elite_user_final3');
-      setChatHistory([]);
-      setMessages([defaultWelcomeMessage]);
-      setShowProfileSettings(false);
-  };
-
-  const startNewChat = () => {
-    setMessages([defaultWelcomeMessage]);
-    setActiveChatId(null);
-    setIsTempChat(false);
-    setShowTempDisclaimer(false);
-    setIsSidebarOpen(false);
-    removeAttachment();
-  };
-
-  const toggleTempChat = () => {
-    if (!isTempChat) {
-      setShowTempDisclaimer(true); 
+    if (isDark) {
+      document.documentElement.classList.add('dark');
+      localStorage.setItem('theme_mode', 'dark');
     } else {
-      setShowTempDisclaimer(false);
-      setIsTempChat(false);
-      startNewChat();
+      document.documentElement.classList.remove('dark');
+      localStorage.setItem('theme_mode', 'light');
     }
-    setIsSidebarOpen(false);
+  }, [isDark]);
+
+  // Scroll chat to bottom
+  useEffect(() => {
+    if (activePage === 'chat') {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, isAiTyping, activePage]);
+
+  // Countdown ticker for order success
+  useEffect(() => {
+    if (activePage === 'success' && countdownSeconds > 0) {
+      const timer = setInterval(() => {
+        setCountdownSeconds(prev => Math.max(0, prev - 1));
+      }, 1000);
+      return () => clearInterval(timer);
+    }
+  }, [activePage, countdownSeconds]);
+
+  // Toast trigger
+  const showToast = (text) => {
+    setToastText(text);
+    setTimeout(() => setToastText(null), 3000);
   };
 
-  const confirmIncognito = () => {
-    setIsTempChat(true);
-    setShowTempDisclaimer(false);
-    setMessages([{ role: 'ai', text: "🕶️ Incognito Mode Activated. Nothing is being saved.", id: Date.now() }]);
-    setActiveChatId(null);
+  // Cart Calculations
+  const subtotal = cartItems.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  const deliveryFee = cartItems.length > 0 ? 150 : 0;
+  const grandTotal = subtotal + deliveryFee;
+  const totalItemCount = cartItems.reduce((sum, item) => sum + item.qty, 0);
+
+  // Add Item to Cart
+  const handleAddToCart = (product) => {
+    const variantName = selectedVariants[product.id] || product.variants[0].name;
+    const variantObj = product.variants.find(v => v.name === variantName) || product.variants[0];
+    const price = variantObj.price;
+
+    setCartItems(prev => {
+      const existingIdx = prev.findIndex(item => item.id === product.id && item.variant === variantName);
+      if (existingIdx > -1) {
+        const copy = [...prev];
+        copy[existingIdx].qty += 1;
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          id: product.id,
+          name: product.name,
+          variant: variantName,
+          price: price,
+          qty: 1,
+          image: product.image
+        }
+      ];
+    });
+
+    showToast(`Added ${product.name} (${variantName}) to cart! 🛒`);
   };
 
-  const cancelTempChat = () => {
-      setShowTempDisclaimer(false);
+  // Change Item Quantity
+  const handleUpdateQty = (idx, delta) => {
+    setCartItems(prev => {
+      const copy = [...prev];
+      const newQty = copy[idx].qty + delta;
+      if (newQty <= 0) {
+        return copy.filter((_, i) => i !== idx);
+      }
+      copy[idx].qty = newQty;
+      return copy;
+    });
   };
 
-  const loadChat = (id) => {
-    const chat = chatHistory.find(c => c.id === id);
-    if (chat) {
-      setMessages(chat.msgs);
-      setActiveChatId(id);
-      setIsTempChat(false);
-      setIsSidebarOpen(false);
+  // Remove Item
+  const handleRemoveItem = (idx) => {
+    setCartItems(prev => prev.filter((_, i) => i !== idx));
+    showToast("Item removed from cart");
+  };
+
+  // Clear Entire Cart
+  const handleClearCart = () => {
+    if (window.confirm("Do you want to clear your cart?")) {
+      setCartItems([]);
+      showToast("Cart cleared");
     }
   };
 
-  const deleteChat = (id, e) => {
-    e.stopPropagation();
-    setChatHistory(prev => prev.filter(c => c.id !== id));
-    if (activeChatId === id) startNewChat();
-  };
+  // Send Message to AI Assistant
+  const handleSendChatMessage = async (textToSend, buttonId = null) => {
+    const text = (textToSend || chatInput).trim();
+    if (!text && !buttonId) return;
 
-  const handleSend = async (overrideText = null) => {
-    const isDirectText = typeof overrideText === 'string';
-    const textToSend = isDirectText ? overrideText : input;
+    const userMsg = {
+      id: Date.now(),
+      role: 'user',
+      text: text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
 
-    if ((!textToSend.trim() && !attachedFileData) || isTyping) return;
-
-    let displayMessageText = textToSend;
-    if(attachedFileName && !textToSend.trim()) displayMessageText = `📁 Uploaded Document: ${attachedFileName}`;
-
-    const userMsgId = Date.now();
-    const aiMsgId = userMsgId + 1;
-
-    const userMsg = { role: 'user', text: displayMessageText, id: userMsgId };
-    
-    const currentMemory = messages
-        .filter(m => m.id !== 1 && m.text !== '_thinking_')
-        .slice(-6)
-        .map(m => ({ role: m.role, text: m.text }));
-
-    setMessages(prev => [...prev, userMsg]);
-    
-    const payloadInputText = textToSend;
-    const payloadFileContent = attachedFileData;
-
-    if (!isDirectText) setInput('');
-    removeAttachment();
-    setIsTyping(true);
-    if(window.innerWidth < 768) setIsSidebarOpen(false);
-
-    if (textareaRef.current && !isDirectText) textareaRef.current.style.height = 'auto';
-
-    setMessages(prev => [...prev, { role: 'ai', text: '_thinking_', id: aiMsgId }]);
+    setChatMessages(prev => [...prev, userMsg]);
+    setChatInput('');
+    setIsAiTyping(true);
 
     try {
-      const requestBody = {
-          message: payloadInputText || `Customer query.`,
-          email: user ? user.email : "guest",
-          client_id: "restaurant_bot",
-          history: currentMemory 
-      };
-
-      if (payloadFileContent) {
-          requestBody.file_content = payloadFileContent;
-      }
-
-      const response = await fetch(`${API_URL}/chat`, {
+      const res = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          message: text,
+          phone: DEFAULT_PHONE,
+          btn_id: buttonId,
+          restaurant_id: 'default_restaurant'
+        })
       });
-      
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || "Server Error");
+
+      if (!res.ok) throw new Error("Server error");
+      const data = await res.json();
+
+      const reply = data.reply_text || data.response || "Order noted!";
+      const buttons = data.buttons || [];
+
+      // If backend updated cart, sync it
+      if (data.cart && data.cart.items && data.cart.items.length > 0) {
+        const synced = data.cart.items.map(it => ({
+          id: it.name.toLowerCase().includes('burger') ? 'zinger' : it.name.toLowerCase().includes('biryani') ? 'biryani' : 'fries',
+          name: it.name,
+          variant: it.variant || 'Regular',
+          price: it.unit_price,
+          qty: it.qty,
+          image: it.name.toLowerCase().includes('burger') ? '/images/zinger.jpg' : it.name.toLowerCase().includes('biryani') ? '/images/biryani.jpg' : '/images/fries.jpg'
+        }));
+        setCartItems(synced);
       }
 
-      const aiMsg = { role: 'ai', text: data.response || "No response.", id: aiMsgId };
-      
-      setMessages(prev => prev.map(m => m.id === aiMsgId ? aiMsg : m));
-
-      if (user && !isTempChat) {
-        setChatHistory(prevHistory => {
-          let updatedHistory;
-          const currentChatMsgs = [...messages, userMsg, aiMsg];
-          if (!activeChatId) {
-            const newId = Date.now() + 2;
-            setActiveChatId(newId);
-            updatedHistory = [{ id: newId, title: displayMessageText.substring(0, 30) + '...', msgs: currentChatMsgs }, ...prevHistory];
-          } else {
-            updatedHistory = prevHistory.map(c => c.id === activeChatId ? { ...c, msgs: currentChatMsgs } : c);
-          }
-          return updatedHistory;
-        });
-      }
-    } catch (e) {
-      setMessages(prev => prev.map(m => m.id === aiMsgId ? {
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: Date.now() + 1,
           role: 'ai',
-          text: `⚠️ **Connection Failed:** Contact the Host.`,
-          id: aiMsgId
-      } : m));
+          text: reply,
+          buttons: buttons,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } catch (e) {
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: Date.now() + 1,
+          role: 'ai',
+          text: "Server connection failed. Baraye meharbani backend check karein.",
+          buttons: ["Retry"],
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
     } finally {
-      setIsTyping(false);
+      setIsAiTyping(false);
     }
   };
 
-  // 🧠 THE ULTIMATE FIX: DYNAMIC CONTEXTUAL CHIPS
-  const getDynamicChips = () => {
-      if (isTyping || messages.length === 0) return [];
-      
-      const lastMsg = messages[messages.length - 1];
-      const lastMsgText = lastMsg.text.toLowerCase();
+  // Place Order from Checkout Form
+  const handlePlaceOrder = () => {
+    if (!customerDetails.name.trim() || !customerDetails.address.trim()) {
+      alert("Please provide your Name and Complete Delivery Address.");
+      return;
+    }
 
-      // ONLY show for the initial welcome message
-      if (lastMsg.role === 'ai' && lastMsgText.includes("restaurant food ordering service")) {
-          return [
-              "View Menu 📋", 
-              "Order Food 🍔",
-              "My Cart 🛒"
-          ];
-      }
+    if (cartItems.length === 0) {
+      alert("Your cart is empty. Please add items before placing order.");
+      return;
+    }
 
-      return [];
-  };
-  const suggestionChips = getDynamicChips();
+    const orderRef = `ZG-${Math.floor(100000 + Math.random() * 900000)}`;
+    const newOrder = {
+      orderId: orderRef,
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      items: [...cartItems],
+      subtotal,
+      deliveryFee,
+      grandTotal,
+      customer: { ...customerDetails }
+    };
 
-  // --- 🎨 THEME ENGINE ---
-  const theme = {
-    isDarkMode: isDarkMode,
-    bg: isDarkMode ? 'bg-[#0a0a0a]' : 'bg-[#eef2f6]',
-    textPrimary: isDarkMode ? 'text-white' : 'text-slate-900',
-    textSecondary: isDarkMode ? 'text-gray-400' : 'text-slate-600',
-    
-    sidebarBg: isDarkMode ? 'bg-[#111111]/90' : 'bg-white/90',
-    sidebarBorder: isDarkMode ? 'border-white/10' : 'border-slate-300',
-    sidebarHover: isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-100',
-    activeHistory: isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-200 text-slate-900 font-bold',
-    
-    headerBg: isDarkMode ? 'bg-[#0a0a0a]/80' : 'bg-[#eef2f6]/80',
-    
-    chatBoxBgAI: isDarkMode ? 'bg-transparent text-gray-200' : 'bg-transparent text-slate-800',
-    chatBoxBgUser: isDarkMode ? 'bg-[#222] text-white border-white/5' : 'bg-white text-slate-900 border-slate-300 shadow-md',
-    
-    inputWrapperBg: isDarkMode ? 'bg-[#1c1c1c]/90' : 'bg-white',
-    inputBorder: isDarkMode ? 'border-white/10 focus-within:border-neutral-500' : 'border-slate-300 focus-within:border-slate-500 shadow-md',
-    inputAreaGradient: isDarkMode ? 'from-[#0a0a0a] via-[#0a0a0a]/95' : 'from-[#eef2f6] via-[#eef2f6]/95',
-    
-    blurOrb1: isDarkMode ? 'bg-blue-900/20' : 'bg-blue-300/30',
-    blurOrb2: isDarkMode ? 'bg-purple-900/20' : 'bg-purple-300/30',
+    setConfirmedOrder(newOrder);
+    setCountdownSeconds(35 * 60);
+    setActivePage('success');
   };
 
-  const accent = accentColors[selectedAccent];
+  const categories = ['All', 'Burgers', 'Rice', 'Sides', 'Drinks'];
+  const filteredProducts = selectedCategory === 'All'
+    ? menuCatalog
+    : menuCatalog.filter(item => {
+        const cat = item.category || '';
+        return cat.toLowerCase().includes(selectedCategory.toLowerCase());
+      });
+
+  // Format timer
+  const formatTimer = (sec) => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   return (
-    <>
-      {/* 🛑 ABSOLUTE LOCK CSS 🛑 */}
-      <style dangerouslySetInnerHTML={{__html: `
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
-        ::selection {
-          background: ${isDarkMode ? '#FBFAF5' : '#292929'};
-          color: ${isDarkMode ? '#292929' : '#FBFAF5'};
-        }
-        ::-moz-selection {
-          background: ${isDarkMode ? '#FBFAF5' : '#292929'};
-          color: ${isDarkMode ? '#292929' : '#FBFAF5'};
-        }
+    <div className={`min-h-screen flex flex-col transition-colors duration-300 ${
+      isDark ? 'bg-[#070709] text-zinc-100' : 'bg-[#fafafa] text-zinc-900'
+    }`}>
 
-        html, body, #root {
-            width: 100vw !important;
-            height: 100dvh !important;
-            overflow: hidden !important;
-            position: fixed !important;
-            top: 0; left: 0;
-            background-color: ${isDarkMode ? '#0a0a0a' : '#eef2f6'};
-        }
-
-        @keyframes fadeIn { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: scale(1); } }
-        @keyframes slideUp { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fade-in { animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-        
-        .markdown-container strong { font-weight: 800; color: inherit; }
-        .markdown-container p { margin-bottom: 14px; }
-        .markdown-container ul { list-style-type: disc; margin-left: 20px; margin-bottom: 14px; }
-        .markdown-container li { margin-bottom: 6px; }
-        
-        .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px;}
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #666; }
-      `}} />
-
-      <div className={`absolute inset-0 flex overflow-hidden ${theme.textPrimary} transition-colors duration-500 font-sans`}>
-        
-        <div className={`absolute top-[-10%] left-[-10%] w-[50%] h-[50%] ${theme.blurOrb1} rounded-full blur-[140px] pointer-events-none z-0`}></div>
-        <div className={`absolute bottom-[-10%] right-[-10%] w-[60%] h-[60%] ${theme.blurOrb2} rounded-full blur-[160px] pointer-events-none z-0`}></div>
-
-        {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 md:hidden" />}
-
-        {/* SIDEBAR */}
-        <div className={`fixed md:relative w-[280px] sm:w-[320px] h-full flex-shrink-0 ${theme.sidebarBg} backdrop-blur-3xl flex flex-col border-r ${theme.sidebarBorder} z-50 transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+      {/* --- 🌟 TOP NAVIGATION BAR --- */}
+      <header className={`sticky top-0 z-40 border-b transition-colors duration-300 ${
+        isDark ? 'bg-[#09090c]/90 border-zinc-800/80 frosted-glass' : 'bg-white/90 border-zinc-200/80 frosted-glass'
+      }`}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 h-20 flex items-center justify-between gap-4">
           
-          <div className="p-5 space-y-4 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <h1 className={`text-xl font-extrabold tracking-tighter flex items-center gap-2 ${theme.textPrimary}`}>
-                 <img src={logoImg} alt="Restaurant Food Ordering Bot" className="w-12 h-12 rounded-xl object-cover shadow-lg border border-white/10" />
-                 Restaurant Food Ordering <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded-md text-white shadow-md ${accent.bg}`}>v3.0</span>
-              </h1>
-              <button onClick={() => setIsSidebarOpen(false)} className="md:hidden opacity-50 p-2"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
+          {/* Logo Brand */}
+          <div
+            onClick={() => setActivePage('menu')}
+            className="flex items-center gap-3 cursor-pointer select-none group"
+          >
+            <div className={`w-11 h-11 rounded-2xl flex items-center justify-center font-heading font-black text-xl transition-all shadow-sm ${
+              isDark ? 'bg-white text-black' : 'bg-zinc-900 text-white'
+            }`}>
+              Z
             </div>
-            
-            <button onClick={startNewChat} className={`w-full flex items-center gap-3 rounded-xl p-3.5 text-sm font-bold transition active:scale-95 border ${theme.sidebarBorder} ${theme.sidebarHover} ${theme.textPrimary} shadow-sm`}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
-              New Conversation
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-heading font-black text-lg tracking-tight uppercase">
+                  Zaiqa Grill
+                </span>
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                  Live
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 font-medium">Fast Food & AI Ordering</p>
+            </div>
+          </div>
+
+          {/* Desktop Navigation Pages */}
+          <nav className="hidden md:flex items-center gap-1.5 p-1 rounded-2xl border transition-colors ${
+            isDark ? 'bg-zinc-900/60 border-zinc-800' : 'bg-zinc-100/70 border-zinc-200'
+          }">
+            <button
+              onClick={() => setActivePage('menu')}
+              className={`px-5 py-2.5 rounded-xl font-heading text-xs font-bold tracking-wide transition-all flex items-center gap-2 ${
+                activePage === 'menu'
+                  ? isDark ? 'bg-white text-zinc-900 shadow-sm' : 'bg-zinc-900 text-white shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              <UtensilsCrossed className="w-3.5 h-3.5" />
+              Menu
             </button>
 
-            {user && (
-              <button onClick={toggleTempChat} className={`w-full flex items-center justify-between rounded-xl p-3.5 text-sm transition group border ${isTempChat ? `${accent.glow} ${accent.text} border-current` : `${theme.sidebarHover} border-transparent ${theme.textSecondary}`}`}>
-                 <span className="flex items-center gap-3">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                  Incognito Mode
-                 </span>
-                 <div className={`w-9 h-5 rounded-full p-0.5 transition ${isTempChat ? accent.bg : (isDarkMode ? 'bg-neutral-700' : 'bg-slate-300')}`}>
-                    <div className={`w-4 h-4 bg-white rounded-full transition-transform duration-200 ${isTempChat ? 'translate-x-4' : 'translate-x-0'}`} />
-                 </div>
-              </button>
-            )}
-          </div>
+            <button
+              onClick={() => setActivePage('chat')}
+              className={`px-5 py-2.5 rounded-xl font-heading text-xs font-bold tracking-wide transition-all flex items-center gap-2 ${
+                activePage === 'chat'
+                  ? isDark ? 'bg-white text-zinc-900 shadow-sm' : 'bg-zinc-900 text-white shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              AI Assistant
+            </button>
 
-          <div className="px-5 mb-4 flex-shrink-0">
-              {!user ? (
-                  <div className={`bg-gradient-to-br ${isDarkMode ? 'from-blue-900/30 to-purple-900/30 border-blue-500/20' : 'from-blue-200/50 to-purple-200/50 border-blue-300'} border rounded-2xl p-6 text-center shadow-lg backdrop-blur-md relative overflow-hidden`}>
-                      <p className={`text-sm font-extrabold mb-2 ${theme.textPrimary}`}>Unlock Features</p>
-                      <p className={`text-xs mb-5 leading-relaxed ${theme.textSecondary}`}>Log in to save history and customize your AI.</p>
-                      <button onClick={() => {setAuthMode('login'); setShowAuthModal(true);}} className={`w-full ${isDarkMode ? 'bg-white text-black' : 'bg-slate-900 text-white'} font-extrabold py-3 rounded-xl text-sm hover:scale-105 transition active:scale-95 shadow-md`}>
-                          Sign In / Sign Up
+            <button
+              onClick={() => setActivePage('cart')}
+              className={`px-5 py-2.5 rounded-xl font-heading text-xs font-bold tracking-wide transition-all flex items-center gap-2 relative ${
+                activePage === 'cart'
+                  ? isDark ? 'bg-white text-zinc-900 shadow-sm' : 'bg-zinc-900 text-white shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              <ShoppingBag className="w-3.5 h-3.5" />
+              Cart
+              {totalItemCount > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-emerald-500 text-white">
+                  {totalItemCount}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setActivePage('checkout')}
+              className={`px-5 py-2.5 rounded-xl font-heading text-xs font-bold tracking-wide transition-all flex items-center gap-2 ${
+                activePage === 'checkout'
+                  ? isDark ? 'bg-white text-zinc-900 shadow-sm' : 'bg-zinc-900 text-white shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              <CreditCard className="w-3.5 h-3.5" />
+              Checkout
+            </button>
+          </nav>
+
+          {/* Right Actions: Premium Glassmorphic Theme Toggle */}
+          <div className="flex items-center gap-3">
+            {/* Cart Quick Button (Mobile & Desktop) */}
+            <button
+              onClick={() => setActivePage('cart')}
+              className={`p-2.5 rounded-xl border flex items-center gap-2 transition-all ${
+                isDark
+                  ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-700 text-zinc-200'
+                  : 'bg-white border-zinc-200 hover:border-zinc-300 text-zinc-800'
+              }`}
+            >
+              <ShoppingBag className="w-4 h-4" />
+              <span className="font-heading text-xs font-bold">
+                {totalItemCount}
+              </span>
+            </button>
+
+            {/* ✨ PREMIUM BLUR GLASS TOGGLE (Sun / Moon) */}
+            <div className={`p-1 rounded-full border flex items-center gap-1 shadow-sm transition-all ${
+              isDark
+                ? 'bg-zinc-900/80 border-zinc-700/80 frosted-glass'
+                : 'bg-white/80 border-zinc-300/80 frosted-glass'
+            }`}>
+              <button
+                onClick={() => setIsDark(false)}
+                title="Light Mode"
+                className={`p-1.5 rounded-full transition-all ${
+                  !isDark
+                    ? 'bg-zinc-900 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Sun className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setIsDark(true)}
+                title="Dark Mode"
+                className={`p-1.5 rounded-full transition-all ${
+                  isDark
+                    ? 'bg-white text-zinc-900 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-800'
+                }`}
+              >
+                <Moon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile Sub-Navigation Bar */}
+        <div className={`flex md:hidden border-t overflow-x-auto no-scrollbar transition-colors ${
+          isDark ? 'bg-[#09090c] border-zinc-800' : 'bg-white border-zinc-200'
+        }`}>
+          {[
+            { id: 'menu', label: 'Menu', icon: UtensilsCrossed },
+            { id: 'chat', label: 'AI Bot', icon: MessageSquare },
+            { id: 'cart', label: `Cart (${totalItemCount})`, icon: ShoppingBag },
+            { id: 'checkout', label: 'Checkout', icon: CreditCard }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActivePage(tab.id)}
+              className={`flex-1 py-3 px-2 text-xs font-heading font-bold text-center flex items-center justify-center gap-1.5 shrink-0 ${
+                activePage === tab.id
+                  ? isDark ? 'text-white border-b-2 border-white' : 'text-zinc-900 border-b-2 border-zinc-900'
+                  : 'text-zinc-400'
+              }`}
+            >
+              <tab.icon className="w-3.5 h-3.5" />
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* --- 🍱 MAIN APPLICATION WORKSPACE --- */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-8">
+        
+        {/* ========================================================================= */}
+        {/* PAGE 1: MENU (ALAG PAGE)                                                  */}
+        {/* ========================================================================= */}
+        {activePage === 'menu' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            {/* Page Header */}
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b pb-6 transition-colors dark:border-zinc-800 border-zinc-200">
+              <div>
+                <span className="text-xs uppercase font-extrabold tracking-widest text-emerald-600 dark:text-emerald-400 font-mono">
+                  Authentic Karachi Flavours
+                </span>
+                <h1 className="font-heading font-black text-3xl sm:text-4xl tracking-tight mt-1">
+                  Our Food Menu
+                </h1>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
+                  Crispy Zingers, Saffron Biryani, Loaded Fries aur Refreshing Coolers.
+                </p>
+              </div>
+
+              {/* Category Pills */}
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                {categories.map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-4 py-2 rounded-xl text-xs font-heading font-bold transition-all shrink-0 ${
+                      selectedCategory === cat
+                        ? isDark ? 'bg-white text-zinc-900 shadow-sm' : 'bg-zinc-900 text-white shadow-sm'
+                        : isDark ? 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800' : 'bg-zinc-100 text-zinc-600 hover:text-zinc-900 border border-zinc-200'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Menu Cards Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {filteredProducts.map((prod) => {
+                const currentVariant = selectedVariants[prod.id] || prod.variants[0].name;
+                const currentPrice = prod.variants.find(v => v.name === currentVariant)?.price || prod.basePrice;
+
+                return (
+                  <div
+                    key={prod.id}
+                    className={`rounded-3xl overflow-hidden border flex flex-col justify-between transition-all duration-300 group hover:-translate-y-1 ${
+                      isDark
+                        ? 'bg-[#0b0b0f] border-zinc-800/80 hover:border-zinc-700 shadow-dark-card hover:shadow-dark-hover'
+                        : 'bg-white border-zinc-200/90 hover:border-zinc-300 shadow-clean hover:shadow-clean-hover'
+                    }`}
+                  >
+                    {/* Image Thumbnail */}
+                    <div className="relative h-56 w-full overflow-hidden bg-zinc-950">
+                      <img
+                        src={prod.image}
+                        alt={prod.name}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        onError={(e) => { e.target.src = "/images/zinger.jpg"; }}
+                      />
+                      <span className="absolute top-3 left-3 px-3 py-1 rounded-full text-xs font-heading font-bold bg-white/90 dark:bg-black/80 backdrop-blur-md shadow-sm">
+                        {prod.badge}
+                      </span>
+                      <span className={`absolute bottom-3 right-3 font-mono font-bold text-sm px-3 py-1 rounded-xl shadow-sm ${
+                        isDark ? 'bg-white text-zinc-950' : 'bg-zinc-950 text-white'
+                      }`}>
+                        PKR {currentPrice}
+                      </span>
+                    </div>
+
+                    {/* Card Content */}
+                    <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
+                      <div>
+                        <h3 className="font-heading font-bold text-lg tracking-tight">
+                          {prod.name}
+                        </h3>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
+                          {prod.description}
+                        </p>
+                      </div>
+
+                      {/* Variant Selector */}
+                      <div className="space-y-2">
+                        <span className="text-[10px] font-mono uppercase tracking-wider font-bold text-zinc-400">
+                          Select Variant:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {prod.variants.map((v) => (
+                            <button
+                              key={v.name}
+                              onClick={() => setSelectedVariants(prev => ({ ...prev, [prod.id]: v.name }))}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-heading font-bold transition-all ${
+                                currentVariant === v.name
+                                  ? isDark ? 'bg-zinc-200 text-zinc-900 shadow-sm' : 'bg-zinc-900 text-white shadow-sm'
+                                  : isDark ? 'bg-zinc-900 text-zinc-400 border border-zinc-800' : 'bg-zinc-100 text-zinc-600 border border-zinc-200'
+                              }`}
+                            >
+                              {v.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Add Button */}
+                      <button
+                        onClick={() => handleAddToCart(prod)}
+                        className={`w-full py-3.5 rounded-2xl font-heading font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all active:scale-98 ${
+                          isDark
+                            ? 'bg-white text-zinc-950 hover:bg-zinc-200'
+                            : 'bg-zinc-900 text-white hover:bg-zinc-800'
+                        }`}
+                      >
+                        <Plus className="w-4 h-4" />
+                        Add to Cart
                       </button>
+                    </div>
                   </div>
-              ) : (
-                <div className="relative">
-                  <svg className={`absolute left-4 top-3.5 ${theme.textSecondary}`} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                  <input type="text" placeholder="Search history..." className={`w-full ${isDarkMode ? 'bg-black/30' : 'bg-white/60'} rounded-xl pl-10 pr-4 py-3 text-xs border ${theme.sidebarBorder} outline-none focus:${accent.border} transition shadow-inner ${theme.textPrimary} placeholder:${theme.textSecondary}`} onChange={(e) => setSearchQuery(e.target.value)} />
+                );
+              })}
+            </div>
+
+            {/* Bottom Floating Bar when items in cart */}
+            {cartItems.length > 0 && (
+              <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row items-center justify-between gap-4 shadow-clean transition-colors ${
+                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold">
+                    <ShoppingBag className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-heading font-bold text-sm">
+                      {totalItemCount} Items Added in Cart
+                    </h4>
+                    <p className="text-xs text-zinc-400">Total: <span className="font-bold text-emerald-500 font-mono">PKR {grandTotal}</span> (Incl. Delivery)</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <button
+                    onClick={() => setActivePage('cart')}
+                    className={`flex-1 sm:flex-initial px-6 py-3 rounded-xl font-heading font-bold text-xs uppercase tracking-wider border transition-colors ${
+                      isDark ? 'border-zinc-700 hover:bg-zinc-800 text-white' : 'border-zinc-300 hover:bg-zinc-100 text-zinc-900'
+                    }`}
+                  >
+                    View Cart
+                  </button>
+                  <button
+                    onClick={() => setActivePage('checkout')}
+                    className="flex-1 sm:flex-initial px-6 py-3 rounded-xl font-heading font-bold text-xs uppercase tracking-wider bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm flex items-center justify-center gap-2"
+                  >
+                    <span>Checkout</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PAGE 2: AI CONCIERGE CHAT (ALAG PAGE)                                     */}
+        {/* ========================================================================= */}
+        {activePage === 'chat' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className={`max-w-4xl mx-auto h-[740px] rounded-3xl border flex flex-col overflow-hidden shadow-clean transition-colors ${
+              isDark ? 'bg-[#09090c] border-zinc-800' : 'bg-white border-zinc-200'
+            }`}
+          >
+            {/* Chat Top Banner */}
+            <div className={`p-4 sm:px-6 border-b flex items-center justify-between transition-colors ${
+              isDark ? 'bg-zinc-900/60 border-zinc-800' : 'bg-zinc-50 border-zinc-200'
+            }`}>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-bold text-sm tracking-tight">
+                    AI Order Assistant
+                  </h3>
+                  <p className="text-xs text-zinc-400 flex items-center gap-1.5 font-mono">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    WhatsApp Multi-Tier LLM Online
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setActivePage('cart')}
+                className={`text-xs font-heading font-bold px-3 py-1.5 rounded-xl border flex items-center gap-1.5 ${
+                  isDark ? 'border-zinc-800 bg-zinc-900 text-zinc-300' : 'border-zinc-200 bg-white text-zinc-700'
+                }`}
+              >
+                <ShoppingBag className="w-3.5 h-3.5" />
+                Cart ({totalItemCount})
+              </button>
+            </div>
+
+            {/* Chat Messages Stream */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+              {chatMessages.map(msg => (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+                >
+                  <div
+                    className={`max-w-[85%] sm:max-w-[75%] p-4 rounded-2xl text-sm leading-relaxed ${
+                      msg.role === 'user'
+                        ? isDark ? 'bg-white text-zinc-950 font-medium rounded-br-none' : 'bg-zinc-900 text-white font-medium rounded-br-none'
+                        : isDark ? 'bg-zinc-900/90 text-zinc-100 border border-zinc-800 rounded-bl-none' : 'bg-zinc-100 text-zinc-900 border border-zinc-200/80 rounded-bl-none'
+                    }`}
+                  >
+                    <div className="chat-markdown">
+                      <ReactMarkdown>{msg.text}</ReactMarkdown>
+                    </div>
+                    <div className={`text-[10px] mt-2 font-mono flex items-center gap-1 ${
+                      msg.role === 'user'
+                        ? isDark ? 'text-zinc-600 justify-end' : 'text-zinc-400 justify-end'
+                        : 'text-zinc-400 justify-start'
+                    }`}>
+                      <Clock className="w-2.5 h-2.5" />
+                      <span>{msg.timestamp}</span>
+                    </div>
+                  </div>
+
+                  {/* Buttons if provided by bot */}
+                  {msg.buttons && msg.buttons.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap gap-2">
+                      {msg.buttons.map((btn, bIdx) => (
+                        <button
+                          key={bIdx}
+                          onClick={() => handleSendChatMessage(btn, `btn_${bIdx + 1}`)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-heading font-bold border transition-all ${
+                            isDark
+                              ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-600 text-zinc-200'
+                              : 'bg-white border-zinc-300 hover:border-zinc-400 text-zinc-800'
+                          }`}
+                        >
+                          {btn}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+
+              {isAiTyping && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-zinc-100 dark:bg-zinc-900 border dark:border-zinc-800 border-zinc-200 w-fit">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                  <span className="text-xs font-mono text-zinc-400">AI Bot is typing...</span>
                 </div>
               )}
-          </div>
+              <div ref={chatEndRef} />
+            </div>
 
-          <div className="flex-1 overflow-y-auto px-4 pb-4 space-y-1.5 custom-scrollbar min-h-0">
-            {user ? (
-                <>
-                    <p className={`text-[10px] ${theme.textSecondary} font-bold uppercase tracking-widest px-2 mb-2 sticky top-0 bg-transparent backdrop-blur-sm py-1`}>Recent Chats</p>
-                    {chatHistory.filter(c => c.title.toLowerCase().includes(searchQuery.toLowerCase())).map(chat => (
-                      <div key={chat.id} onClick={() => loadChat(chat.id)} className={`p-3 rounded-xl cursor-pointer text-sm transition group flex items-center gap-3 ${activeChatId === chat.id ? theme.activeHistory : `${theme.sidebarHover} ${theme.textSecondary} border border-transparent`}`}>
-                        <svg className="flex-shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                        <span className="truncate flex-1 font-medium">{chat.title}</span>
-                        {activeChatId === chat.id && (
-                          <button onClick={(e) => deleteChat(chat.id, e)} className="text-gray-400 hover:text-red-500 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {chatHistory.length === 0 && <div className="text-center mt-10"><p className={`text-[10px] font-bold uppercase tracking-widest ${theme.textSecondary}`}>No History</p></div>}
-                </>
+            {/* Quick Chips Bar */}
+            <div className={`px-4 py-2 border-t flex items-center gap-2 overflow-x-auto no-scrollbar ${
+              isDark ? 'bg-zinc-900/40 border-zinc-800' : 'bg-zinc-50 border-zinc-200'
+            }`}>
+              <span className="text-[10px] uppercase font-bold text-zinc-400 font-mono">QUICK:</span>
+              {["Menu Dikhao 📋", "2 Crispy Zinger 🍔", "Loaded Fries 🍟", "Cart Dekhao 🛒", "Checkout 💳"].map((chip, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSendChatMessage(chip)}
+                  className={`shrink-0 px-3 py-1 rounded-lg text-xs font-heading font-semibold border ${
+                    isDark ? 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-white' : 'bg-white border-zinc-200 text-zinc-700 hover:text-black'
+                  }`}
+                >
+                  {chip}
+                </button>
+              ))}
+            </div>
+
+            {/* Input Dock */}
+            <div className={`p-4 border-t ${isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200'}`}>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleSendChatMessage();
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  placeholder="Kuch bhi likhein... (e.g. 1 Special Biryani Spicy chahiye)"
+                  className={`flex-1 px-4 py-3.5 rounded-2xl border text-sm font-sans focus:outline-none transition-all ${
+                    isDark
+                      ? 'bg-zinc-950 border-zinc-800 text-white placeholder-zinc-500 focus:border-zinc-600'
+                      : 'bg-zinc-50 border-zinc-300 text-zinc-900 placeholder-zinc-400 focus:border-zinc-400'
+                  }`}
+                />
+                <button
+                  type="submit"
+                  disabled={isAiTyping || !chatInput.trim()}
+                  className={`p-3.5 rounded-2xl transition-all ${
+                    chatInput.trim()
+                      ? isDark ? 'bg-white text-zinc-950 font-bold' : 'bg-zinc-900 text-white font-bold'
+                      : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed'
+                  }`}
+                >
+                  <Send className="w-5 h-5" />
+                </button>
+              </form>
+            </div>
+          </motion.div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PAGE 3: CART (ALAG PAGE)                                                  */}
+        {/* ========================================================================= */}
+        {activePage === 'cart' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="max-w-4xl mx-auto space-y-6"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b pb-4 dark:border-zinc-800 border-zinc-200">
+              <div>
+                <h1 className="font-heading font-black text-3xl tracking-tight">
+                  Your Food Cart
+                </h1>
+                <p className="text-sm text-zinc-400 mt-1">Review items before proceeding to checkout</p>
+              </div>
+
+              {cartItems.length > 0 && (
+                <button
+                  onClick={handleClearCart}
+                  className="text-xs font-heading font-bold text-red-500 hover:text-red-600 flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Clear Cart
+                </button>
+              )}
+            </div>
+
+            {cartItems.length === 0 ? (
+              <div className={`p-12 rounded-3xl border text-center space-y-4 ${
+                isDark ? 'bg-zinc-900/50 border-zinc-800' : 'bg-white border-zinc-200'
+              }`}>
+                <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto text-zinc-400">
+                  <ShoppingBag className="w-8 h-8" />
+                </div>
+                <h3 className="font-heading font-bold text-xl">Your cart is currently empty</h3>
+                <p className="text-sm text-zinc-400 max-w-sm mx-auto">
+                  Looks like you haven't added anything to your cart yet. Explore our delicious burgers and biryani!
+                </p>
+                <button
+                  onClick={() => setActivePage('menu')}
+                  className={`px-6 py-3 rounded-xl font-heading font-bold text-xs uppercase tracking-wider ${
+                    isDark ? 'bg-white text-zinc-950' : 'bg-zinc-900 text-white'
+                  }`}
+                >
+                  Explore Food Menu ➔
+                </button>
+              </div>
             ) : (
-                <div className={`flex flex-col items-center justify-center h-full opacity-50 px-4 text-center ${theme.textSecondary}`}>
-                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="mb-4"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    <p className="text-xs font-semibold">History disabled, login to enable</p>
-                </div>
-            )}
-          </div>
-
-          <div className={`p-4 border-t ${theme.sidebarBorder} relative bg-transparent flex-shrink-0`}>
-            {showProfileSettings && user && (
-              <div className={`absolute bottom-20 left-4 w-[270px] ${isDarkMode ? 'bg-[#1a1a1a]' : 'bg-white'} backdrop-blur-3xl rounded-3xl shadow-2xl border ${theme.sidebarBorder} overflow-hidden animate-slide-up z-50 p-2`}>
-                <div className={`p-4 border-b ${theme.sidebarBorder} flex items-center gap-4`}>
-                  <div className={`w-12 h-12 rounded-full ${accent.bg} text-white flex items-center justify-center font-extrabold text-xl shadow-inner`}>{user.email.charAt(0).toUpperCase()}</div>
-                  <div className="overflow-hidden">
-                      <p className={`text-sm font-extrabold truncate ${theme.textPrimary}`}>{user.email}</p>
-                      <span className={`text-[9px] px-2 py-0.5 rounded-md ${accent.glow} ${accent.text} mt-1 inline-block font-bold tracking-widest border border-current/20`}>VERIFIED</span>
-                  </div>
-                </div>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 
-                <div className="p-3 space-y-4">
-                  <div className="flex items-center justify-between px-1">
-                    <span className={`text-xs font-bold ${theme.textSecondary}`}>Theme Mode</span>
-                    <button onClick={() => setIsDarkMode(!isDarkMode)} className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-2 ${isDarkMode ? 'bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20' : 'bg-indigo-500/10 text-indigo-600 hover:bg-indigo-100'}`}>
-                      {isDarkMode ? '💡 Light' : '🌙 Dark'}
-                    </button>
+                {/* Items List (7 cols) */}
+                <div className="lg:col-span-7 space-y-3">
+                  {cartItems.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-4 rounded-2xl border flex items-center justify-between gap-4 transition-colors ${
+                        isDark ? 'bg-zinc-900/60 border-zinc-800' : 'bg-white border-zinc-200 shadow-sm'
+                      }`}
+                    >
+                      {/* Thumbnail & Info */}
+                      <div className="flex items-center gap-3.5">
+                        <img
+                          src={item.image}
+                          alt={item.name}
+                          className="w-16 h-16 rounded-xl object-cover bg-black"
+                          onError={(e) => { e.target.src = "/images/zinger.jpg"; }}
+                        />
+                        <div>
+                          <h4 className="font-heading font-bold text-sm">
+                            {item.name}
+                          </h4>
+                          <span className="text-xs font-mono text-zinc-400">
+                            {item.variant} • PKR {item.price} each
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Controls */}
+                      <div className="flex items-center gap-4">
+                        <div className={`flex items-center border rounded-xl p-1 ${
+                          isDark ? 'border-zinc-700 bg-zinc-950' : 'border-zinc-300 bg-zinc-50'
+                        }`}>
+                          <button
+                            onClick={() => handleUpdateQty(idx, -1)}
+                            className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="font-mono text-xs font-bold px-2.5">
+                            {item.qty}
+                          </span>
+                          <button
+                            onClick={() => handleUpdateQty(idx, 1)}
+                            className="p-1 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="text-right min-w-[70px]">
+                          <span className="font-mono font-bold text-sm">
+                            PKR {item.price * item.qty}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleRemoveItem(idx)}
+                          className="text-zinc-400 hover:text-red-500 transition-colors p-1"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Bill Summary (5 cols) */}
+                <div className={`lg:col-span-5 p-6 rounded-3xl border space-y-4 ${
+                  isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200 shadow-clean'
+                }`}>
+                  <h3 className="font-heading font-bold text-lg border-b pb-3 dark:border-zinc-800 border-zinc-200">
+                    Order Summary
+                  </h3>
+
+                  <div className="space-y-2 text-xs font-mono text-zinc-500 dark:text-zinc-400">
+                    <div className="flex justify-between">
+                      <span>Subtotal ({totalItemCount} items):</span>
+                      <span className="text-zinc-900 dark:text-zinc-100 font-bold">PKR {subtotal}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="flex items-center gap-1">
+                        <Truck className="w-3.5 h-3.5" />
+                        Flat Delivery Fee:
+                      </span>
+                      <span className="text-zinc-900 dark:text-zinc-100 font-bold">PKR {deliveryFee}</span>
+                    </div>
+                    <div className="flex justify-between pt-3 border-t text-sm font-bold dark:border-zinc-800 border-zinc-200">
+                      <span className="text-zinc-900 dark:text-white font-heading">GRAND TOTAL:</span>
+                      <span className="text-emerald-500 font-mono text-base font-extrabold">
+                        PKR {grandTotal}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setActivePage('checkout')}
+                    className={`w-full py-4 rounded-2xl font-heading font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-all ${
+                      isDark ? 'bg-white text-zinc-950 hover:bg-zinc-200' : 'bg-zinc-900 text-white hover:bg-zinc-800'
+                    }`}
+                  >
+                    <span>Proceed to Checkout</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    onClick={() => setActivePage('menu')}
+                    className="w-full text-center text-xs font-heading font-bold text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                  >
+                    + Add More Items
+                  </button>
+                </div>
+
+              </div>
+            )}
+          </motion.div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PAGE 4: CHECKOUT & DELIVERY DETAILS (ALAG PAGE)                           */}
+        {/* ========================================================================= */}
+        {activePage === 'checkout' && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="max-w-4xl mx-auto space-y-6"
+          >
+            {/* Header */}
+            <div className="flex items-center gap-3 border-b pb-4 dark:border-zinc-800 border-zinc-200">
+              <button
+                onClick={() => setActivePage('cart')}
+                className="p-2 rounded-xl border dark:border-zinc-800 border-zinc-200 text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <div>
+                <h1 className="font-heading font-black text-3xl tracking-tight">
+                  Checkout & Delivery Details
+                </h1>
+                <p className="text-sm text-zinc-400">Fill in your delivery address to confirm the order</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+              
+              {/* Form Details (7 cols) */}
+              <div className={`lg:col-span-7 p-6 rounded-3xl border space-y-5 ${
+                isDark ? 'bg-zinc-900/60 border-zinc-800' : 'bg-white border-zinc-200 shadow-clean'
+              }`}>
+                <h3 className="font-heading font-bold text-base flex items-center gap-2">
+                  <User className="w-4 h-4 text-emerald-500" />
+                  Customer Information
+                </h3>
+
+                <div className="space-y-4 text-xs font-heading">
+                  <div>
+                    <label className="block font-bold text-zinc-500 uppercase tracking-wider mb-1.5 font-mono text-[10px]">
+                      Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={customerDetails.name}
+                      onChange={(e) => setCustomerDetails(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="e.g. Saqiq Shahzad"
+                      className={`w-full p-3.5 rounded-xl border text-sm font-sans focus:outline-none transition-colors ${
+                        isDark ? 'bg-zinc-950 border-zinc-800 text-white focus:border-zinc-600' : 'bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-zinc-400'
+                      }`}
+                    />
                   </div>
 
                   <div>
-                      <p className={`text-[10px] ${theme.textSecondary} font-bold uppercase tracking-widest px-1 mb-2`}>Color Accent</p>
-                      <div className={`flex gap-3 p-3 rounded-2xl ${isDarkMode ? 'bg-[#2a2a2a]/50' : 'bg-slate-100'} border ${theme.sidebarBorder} justify-center`}>
-                          {Object.keys(accentColors).map(key => (
-                              <button key={key} onClick={() => setSelectedAccent(key)} className={`w-8 h-8 rounded-full border-2 transition-all hover:scale-110 shadow-md ${selectedAccent === key ? (isDarkMode ? 'border-white scale-110' : 'border-slate-800 scale-110') : 'border-transparent opacity-50'} ${accentColors[key].bg}`}></button>
-                          ))}
-                      </div>
+                    <label className="block font-bold text-zinc-500 uppercase tracking-wider mb-1.5 font-mono text-[10px]">
+                      WhatsApp Contact Number *
+                    </label>
+                    <input
+                      type="text"
+                      value={customerDetails.phone}
+                      onChange={(e) => setCustomerDetails(prev => ({ ...prev, phone: e.target.value }))}
+                      placeholder="+92 300 1234567"
+                      className={`w-full p-3.5 rounded-xl border text-sm font-sans focus:outline-none transition-colors ${
+                        isDark ? 'bg-zinc-950 border-zinc-800 text-white focus:border-zinc-600' : 'bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-zinc-400'
+                      }`}
+                    />
                   </div>
 
-                  <button onClick={logout} className={`w-full text-left p-3.5 hover:bg-red-500/10 text-red-500 rounded-xl text-sm transition font-bold flex items-center gap-3 border border-transparent hover:border-red-500/20`}>
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M19 12H5m14 0-4 4m4-4-4-4"/></svg> Secure Logout
-                  </button>
+                  <div>
+                    <label className="block font-bold text-zinc-500 uppercase tracking-wider mb-1.5 font-mono text-[10px]">
+                      Complete Delivery Address & Landmark *
+                    </label>
+                    <textarea
+                      rows={3}
+                      value={customerDetails.address}
+                      onChange={(e) => setCustomerDetails(prev => ({ ...prev, address: e.target.value }))}
+                      placeholder="House / Apartment number, Street name, Phase/Area, City"
+                      className={`w-full p-3.5 rounded-xl border text-sm font-sans focus:outline-none transition-colors resize-none ${
+                        isDark ? 'bg-zinc-950 border-zinc-800 text-white focus:border-zinc-600' : 'bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-zinc-400'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-zinc-500 uppercase tracking-wider mb-1.5 font-mono text-[10px]">
+                      Order Notes / Instructions (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={customerDetails.notes}
+                      onChange={(e) => setCustomerDetails(prev => ({ ...prev, notes: e.target.value }))}
+                      placeholder="e.g. less spicy, extra sauce, call on arrival"
+                      className={`w-full p-3.5 rounded-xl border text-sm font-sans focus:outline-none transition-colors ${
+                        isDark ? 'bg-zinc-950 border-zinc-800 text-white focus:border-zinc-600' : 'bg-zinc-50 border-zinc-300 text-zinc-900 focus:border-zinc-400'
+                      }`}
+                    />
+                  </div>
+
+                  {/* Payment Method Selection */}
+                  <div className="pt-2">
+                    <label className="block font-bold text-zinc-500 uppercase tracking-wider mb-2 font-mono text-[10px]">
+                      Select Payment Method
+                    </label>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {[
+                        { id: 'Cash on Delivery (COD)', label: 'Cash on Delivery 💵' },
+                        { id: 'Online Transfer', label: 'Online Bank / Easypaisa 📱' },
+                        { id: 'Card on Delivery', label: 'Card on Delivery 💳' }
+                      ].map((method) => (
+                        <button
+                          key={method.id}
+                          type="button"
+                          onClick={() => setCustomerDetails(prev => ({ ...prev, paymentMethod: method.id }))}
+                          className={`p-3 rounded-xl border text-xs font-heading font-bold text-left transition-all ${
+                            customerDetails.paymentMethod === method.id
+                              ? isDark ? 'bg-white text-zinc-950 border-white shadow-sm' : 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
+                              : isDark ? 'bg-zinc-950 border-zinc-800 text-zinc-400' : 'bg-zinc-50 border-zinc-200 text-zinc-700'
+                          }`}
+                        >
+                          {method.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
-            )}
-            
-            {user ? (
-              <button onClick={() => setShowProfileSettings(!showProfileSettings)} className={`w-full flex items-center gap-4 p-2.5 rounded-2xl transition ${theme.sidebarHover} border border-transparent shadow-sm group`}>
-                  <div className={`w-10 h-10 rounded-full ${accent.bg} text-white flex items-center justify-center font-extrabold text-sm group-hover:scale-105 transition shadow-md`}>{user.email.charAt(0).toUpperCase()}</div>
-                  <div className="flex-1 text-left overflow-hidden">
-                      <span className={`text-sm font-bold leading-tight block truncate ${theme.textPrimary}`}>{user.email}</span>
-                      <span className={`text-[10px] ${theme.textSecondary} font-medium`}>Settings & Theme</span>
-                  </div>
-              </button>
-            ) : (
-               <div className="text-center w-full">
-                  <button onClick={() => {setAuthMode('login'); setShowAuthModal(true);}} className={`w-full ${isDarkMode ? 'bg-white text-black' : 'bg-slate-900 text-white'} font-extrabold py-3.5 rounded-xl text-sm hover:opacity-80 transition active:scale-95 shadow-md`}>
-                      Sign In / Sign Up
-                  </button>
-               </div>
-            )}
-          </div>
-        </div>
 
-        {/* MAIN CHAT AREA */}
-        <div className="flex-1 flex flex-col h-full relative z-10 min-w-0 overflow-hidden">
-          
-          <header className={`h-16 border-b ${theme.sidebarBorder} flex items-center justify-between px-6 md:px-8 ${theme.headerBg} backdrop-blur-xl z-30 flex-shrink-0`}>
-            <div className="flex items-center gap-3">
-              <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 -ml-2 rounded-lg hover:bg-white/5 transition"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M3 12h18M3 6h18M3 18h18"/></svg></button>
-              <span className={`text-[12px] md:text-sm font-extrabold tracking-widest uppercase flex items-center gap-3 ${theme.textPrimary}`}>
-                 Restaurant Food Ordering Bot
-                 <span className={`w-2 h-2 md:w-2.5 md:h-2.5 rounded-full ${accent.bg} animate-pulse`}></span>
-              </span>
-            </div>
-            {isTempChat && (
-              <span className="text-[9px] md:text-[10px] bg-indigo-500/10 text-indigo-500 px-2 md:px-3 py-1.5 rounded-full border border-indigo-500/30 font-bold flex items-center shadow-sm">
-                 INCOGNITO ON
-              </span>
-            )}
-          </header>
+              {/* Order Review Sidebar (5 cols) */}
+              <div className={`lg:col-span-5 p-6 rounded-3xl border space-y-5 ${
+                isDark ? 'bg-zinc-900 border-zinc-800' : 'bg-white border-zinc-200 shadow-clean'
+              }`}>
+                <h3 className="font-heading font-bold text-base border-b pb-3 dark:border-zinc-800 border-zinc-200">
+                  Review & Confirm
+                </h3>
 
-          <div ref={chatContainerRef} className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-10">
-            <div className="max-w-4xl mx-auto w-full flex flex-col gap-6 pb-4">
-              
-              {messages.length === 0 && (
-                 <div className="flex flex-col items-center justify-center mt-20 opacity-80 select-none px-4 text-center animate-fade-in">
-                    <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 border ${theme.sidebarBorder} shadow-2xl backdrop-blur-xl ${isDarkMode ? 'bg-white/5' : 'bg-black/5'}`}>
-                        <svg className={theme.textSecondary} width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                <div className="space-y-3 max-h-48 overflow-y-auto">
+                  {cartItems.map((item, i) => (
+                    <div key={i} className="flex justify-between items-center text-xs">
+                      <div>
+                        <span className="font-heading font-bold">{item.name}</span>
+                        <p className="text-[11px] text-zinc-400 font-mono">[{item.variant}] × {item.qty}</p>
+                      </div>
+                      <span className="font-mono font-bold">
+                        PKR {item.price * item.qty}
+                      </span>
                     </div>
-                    <h1 className={`text-3xl md:text-4xl font-extrabold mt-4 tracking-tighter ${theme.textPrimary} mb-3`}>Ready to Assist.</h1>
-                    <p className={`text-sm ${theme.textSecondary}`}>Ask questions about dishes, customize your meal, or place your food order.</p>
-                 </div>
-              )}
+                  ))}
+                </div>
 
-              {messages.map((msg, i) => (
-                <div key={msg.id || i} className={`flex gap-3 md:gap-5 group animate-fade-in ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                  <div className={`w-8 h-8 md:w-10 md:h-10 rounded-xl flex items-center justify-center font-bold text-[10px] md:text-[11px] flex-shrink-0 shadow-md mt-1 border ${msg.role === 'ai' ? `${accent.bg} text-white border-transparent` : (isDarkMode ? 'bg-neutral-800 text-white border-neutral-600' : 'bg-white text-slate-800 border-slate-300 shadow-sm')}`}>
-                    {msg.role === 'ai' ? 'AI' : (user ? user.email.charAt(0).toUpperCase() : 'U')}
+                <div className="pt-3 border-t space-y-2 text-xs font-mono dark:border-zinc-800 border-zinc-200 text-zinc-500 dark:text-zinc-400">
+                  <div className="flex justify-between">
+                    <span>Subtotal:</span>
+                    <span className="font-bold text-zinc-900 dark:text-white">PKR {subtotal}</span>
                   </div>
-                  
-                  <div className={`max-w-[90%] md:max-w-[85%] text-[14px] md:text-[15.5px] leading-relaxed markdown-container break-words border ${msg.role === 'user' ? `${theme.chatBoxBgUser} px-4 md:px-6 py-3 md:py-4 rounded-2xl md:rounded-3xl rounded-tr-sm` : `${theme.chatBoxBgAI} ${isDarkMode ? 'bg-[#1c1c1c]/40' : 'bg-white/80'} backdrop-blur-2xl p-4 md:p-6 rounded-2xl md:rounded-3xl rounded-tl-sm shadow-lg`}`}>
-                      {msg.text === '_thinking_' ? (
-                          <div className="flex gap-2 items-center h-6 animate-pulse">
-                              <div className={`w-2.5 h-2.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-800'} animate-bounce`}></div>
-                              <div className={`w-2.5 h-2.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-800'} animate-bounce delay-75`}></div>
-                              <div className={`w-2.5 h-2.5 rounded-full ${isDarkMode ? 'bg-white' : 'bg-slate-800'} animate-bounce delay-150`}></div>
-                          </div>
-                      ) : (
-                          <ReactMarkdown>{msg.text}</ReactMarkdown>
-                      )}
+                  <div className="flex justify-between">
+                    <span>Delivery:</span>
+                    <span className="font-bold text-zinc-900 dark:text-white">PKR {deliveryFee}</span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t text-sm font-bold dark:border-zinc-800 border-zinc-200">
+                    <span className="text-zinc-900 dark:text-white font-heading">Total Amount:</span>
+                    <span className="text-emerald-500 font-mono text-base font-extrabold">PKR {grandTotal}</span>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          {/* INPUT AREA WITH ATTACHMENT */}
-          <div className={`p-4 md:p-6 lg:pb-8 bg-gradient-to-t ${theme.inputAreaGradient} flex-shrink-0 z-20`}>
-            <div className="max-w-4xl mx-auto relative group">
-              
-              {/* FILE PREVIEW BAR */}
-              {attachedFileName && (
-                  <div className={`mb-3 flex justify-between items-center px-4 py-2 rounded-xl text-[12px] font-bold border ${accent.border} ${accent.glow} ${accent.text}`}>
-                      <span className="truncate">📁 {attachedFileName}</span>
-                      <button onClick={removeAttachment} className="ml-3 hover:text-red-500 font-extrabold text-sm">✖</button>
-                  </div>
-              )}
-
-              {/* 🧠 THE ULTIMATE FIX: DYNAMIC SUGGESTION CHIPS (CLICK TO SEND) */}
-              {suggestionChips.length > 0 && (
-                  <div className="flex flex-wrap gap-3 mb-4 justify-center md:justify-start animate-fade-in">
-                      {suggestionChips.map((chip, idx) => (
-                          <button
-                              key={idx}
-                              onClick={() => handleSend(chip)}
-                              className={`px-5 py-2.5 rounded-full text-sm font-bold border transition-all active:scale-95 shadow-md flex items-center gap-2 ${accent.bg} text-white border-transparent hover:opacity-80`}
-                          >
-                              {chip}
-                          </button>
-                      ))}
-                  </div>
-              )}
-
-              <div className={`${theme.inputWrapperBg} backdrop-blur-3xl rounded-3xl border ${theme.inputBorder} transition-all p-2 flex items-end shadow-2xl`}>
-                
-                {/* FILE UPLOAD BUTTON */}
-                <input type="file" id="al-file-injector" ref={fileInputRef} className="hidden" onChange={handleFileChange} accept=".txt,.json,.csv,.pdf,.png,.jpg,.jpeg" />
-                <label htmlFor="al-file-injector" className={`p-3 md:p-4 mr-1 mb-1 rounded-xl flex items-center justify-center cursor-pointer transition-all ${attachedFileData ? `${accent.bg} text-white shadow-md` : `bg-transparent ${theme.textSecondary} hover:${theme.textPrimary}`}`}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
-                </label>
-
-                <textarea
-                  ref={textareaRef}
-                  rows="1"
-                  className={`flex-1 bg-transparent ${theme.textPrimary} p-3 md:p-4 outline-none resize-none max-h-32 md:max-h-48 text-[14px] md:text-[15px] custom-scrollbar placeholder:${theme.textSecondary}`}
-                  placeholder="Ask a question or upload a document..."
-                  value={input}
-                  onChange={(e) => {
-                      setInput(e.target.value);
-                      e.target.style.height = 'auto';
-                      e.target.style.height = Math.min(e.target.scrollHeight, 150) + 'px';
-                  }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-                />
+                {/* Final Place Order Button */}
                 <button
-                  onClick={() => handleSend()}
-                  disabled={(!input.trim() && !attachedFileData) || isTyping}
-                  className={`p-3 md:p-4 rounded-xl md:rounded-2xl mb-1 mr-1 transition-all flex items-center justify-center ${ (input.trim() || attachedFileData) && !isTyping ? `${accent.bg} text-white shadow-lg hover:scale-105 active:scale-95` : `bg-transparent ${theme.textSecondary} cursor-not-allowed`}`}
+                  onClick={handlePlaceOrder}
+                  className="w-full py-4 rounded-2xl font-heading font-extrabold text-sm uppercase tracking-wider bg-emerald-500 hover:bg-emerald-600 text-white shadow-dopamine-glow transition-all active:scale-98 flex items-center justify-center gap-2"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                  <Check className="w-5 h-5 stroke-[2.5]" />
+                  <span>Place Order (PKR {grandTotal})</span>
                 </button>
               </div>
-              <p className={`text-center text-[10px] md:text-[11px] ${theme.textSecondary} mt-3 font-semibold tracking-[1px]`}>
-                AI can make mistakes. Verify important information.
+
+            </div>
+          </motion.div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* PAGE 5: ORDER DONE / CONFIRMED (DOPAMINE HIT GREEN TICK 🟢)               */}
+        {/* ========================================================================= */}
+        {activePage === 'success' && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="max-w-2xl mx-auto text-center space-y-8 py-6"
+          >
+            {/* ✨ THE DOPAMINE HIT GREEN TICK */}
+            <div className="relative flex justify-center">
+              <div className="w-28 h-28 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 flex items-center justify-center shadow-dopamine-glow dopamine-pop">
+                <CheckCircle2 className="w-20 h-20 text-emerald-500 stroke-[2.2]" />
+              </div>
+            </div>
+
+            {/* Headline and Order Reference */}
+            <div>
+              <span className="text-xs uppercase font-extrabold tracking-widest text-emerald-600 dark:text-emerald-400 font-mono">
+                Order Received & Verified
+              </span>
+              <h1 className="font-heading font-black text-3xl sm:text-4xl tracking-tight mt-1">
+                Zabardast! Order Confirmed 🎉
+              </h1>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                Order Reference: <span className="font-mono font-bold text-zinc-900 dark:text-white">#{confirmedOrder ? confirmedOrder.orderId : 'ZG-928174'}</span>
               </p>
             </div>
-          </div>
-        </div>
-      </div>
 
-      {/* AUTH MODAL */}
-      {showAuthModal && !user && (
-         <div className="fixed inset-0 bg-black/80 backdrop-blur-2xl z-[200] flex items-center justify-center p-4 animate-fade-in overflow-y-auto">
-           <div className={`absolute top-[10%] left-[20%] w-[400px] h-[400px] ${theme.blurOrb1} rounded-full blur-[150px] pointer-events-none`}></div>
-           
-           <div className={`w-full max-w-md my-auto ${isDarkMode ? 'bg-[#111111]/95' : 'bg-white/95'} backdrop-blur-3xl p-6 md:p-10 rounded-[2rem] border ${theme.sidebarBorder} shadow-2xl relative z-10 animate-slide-up`}>
-              <button onClick={() => setShowAuthModal(false)} className={`absolute top-6 right-6 ${theme.textSecondary} hover:${theme.textPrimary} transition ${theme.sidebarHover} p-2 rounded-full`}>
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            {/* Live Kitchen Tracker & Countdown */}
+            <div className={`p-6 rounded-3xl border space-y-6 text-left transition-colors ${
+              isDark ? 'bg-zinc-900/80 border-zinc-800' : 'bg-white border-zinc-200 shadow-clean'
+            }`}>
+              {/* Estimated Delivery Countdown */}
+              <div className="flex items-center justify-between pb-4 border-b dark:border-zinc-800 border-zinc-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-bold">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-heading font-bold text-sm">Estimated Delivery Time</h4>
+                    <p className="text-xs text-zinc-400">Rider is being assigned to your order</p>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="font-mono font-black text-2xl text-emerald-500">
+                    {formatTimer(countdownSeconds)}
+                  </span>
+                  <span className="block text-[10px] text-zinc-400 uppercase font-mono">Mins Remaining</span>
+                </div>
+              </div>
+
+              {/* Step Tracker */}
+              <div className="grid grid-cols-4 gap-2 pt-2">
+                {[
+                  { step: '1', title: 'Confirmed', done: true },
+                  { step: '2', title: 'Cooking 🍔', done: true },
+                  { step: '3', title: 'On the Way 🛵', done: false },
+                  { step: '4', title: 'Delivered 📍', done: false }
+                ].map((st, sIdx) => (
+                  <div key={sIdx} className="text-center space-y-1.5">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center mx-auto text-xs font-bold ${
+                      st.done
+                        ? 'bg-emerald-500 text-white shadow-sm'
+                        : isDark ? 'bg-zinc-800 text-zinc-500' : 'bg-zinc-100 text-zinc-400'
+                    }`}>
+                      {st.done ? '✓' : st.step}
+                    </div>
+                    <span className="block text-[11px] font-heading font-bold text-zinc-500 dark:text-zinc-400">
+                      {st.title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Delivery Destination Card */}
+              <div className={`p-4 rounded-2xl border text-xs space-y-1.5 ${
+                isDark ? 'bg-zinc-950 border-zinc-800' : 'bg-zinc-50 border-zinc-200'
+              }`}>
+                <div className="flex items-center gap-1.5 font-heading font-bold text-zinc-900 dark:text-white">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-500" />
+                  <span>Delivering to: {confirmedOrder ? confirmedOrder.customer.name : customerDetails.name}</span>
+                </div>
+                <p className="text-zinc-500 dark:text-zinc-400 pl-5">
+                  {confirmedOrder ? confirmedOrder.customer.address : customerDetails.address}
+                </p>
+                <div className="flex items-center gap-4 pl-5 pt-1 text-zinc-400 font-mono text-[11px]">
+                  <span>Payment: {confirmedOrder ? confirmedOrder.customer.paymentMethod : customerDetails.paymentMethod}</span>
+                  <span>Total: PKR {confirmedOrder ? confirmedOrder.grandTotal : grandTotal}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={() => {
+                  setCartItems([]);
+                  setActivePage('menu');
+                }}
+                className={`w-full sm:w-auto px-8 py-3.5 rounded-2xl font-heading font-bold text-xs uppercase tracking-wider ${
+                  isDark ? 'bg-white text-zinc-950' : 'bg-zinc-900 text-white'
+                }`}
+              >
+                Order More Food 🍔
               </button>
-              
-              <div className={`w-14 h-14 md:w-16 md:h-16 ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'} rounded-2xl flex items-center justify-center mx-auto mb-6 border ${theme.sidebarBorder} shadow-sm`}>
-                  <svg className={theme.textPrimary} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-              </div>
 
-              <h2 className={`text-2xl md:text-3xl font-extrabold mb-2 text-center tracking-tight ${theme.textPrimary}`}>
-                 {authMode === 'forgot' || authMode === 'reset' ? 'Account Recovery' : 'Elite Access'}
-              </h2>
-              <p className={`text-center mb-6 md:mb-8 text-xs md:text-sm ${theme.textSecondary}`}>
-                {authMode === 'login' ? 'Welcome back! Sign in to continue.' :
-                 authMode === 'signup' ? 'Create a secure account.' :
-                 authMode === 'forgot' ? 'Enter email to receive reset code.' :
-                 authMode === 'reset' ? 'Enter new password and OTP.' :
-                 'Check your email for the verification code.'}
-              </p>
-
-              <form onSubmit={handleAuth} className="space-y-4 md:space-y-5">
-                  {(authMode === 'login' || authMode === 'signup' || authMode === 'forgot' || authMode === 'reset') && (
-                      <div>
-                          <label className={`text-[10px] ${theme.textSecondary} font-bold uppercase tracking-widest mb-2 block`}>Email Address</label>
-                          <input type="email" required disabled={authMode === 'reset'} className={`w-full ${theme.inputWrapperBg} border ${theme.sidebarBorder} rounded-xl p-3 md:p-4 outline-none focus:${accent.border} transition ${theme.textPrimary} shadow-inner text-sm disabled:opacity-50`} value={email} onChange={(e) => setEmail(e.target.value)} />
-                      </div>
-                  )}
-
-                  {(authMode === 'login' || authMode === 'signup' || authMode === 'reset') && (
-                      <div className="relative">
-                          <label className={`text-[10px] ${theme.textSecondary} font-bold uppercase tracking-widest mb-2 block`}>
-                              {authMode === 'reset' ? 'New Password' : 'Password'}
-                          </label>
-                          <input
-                              type={showPassword ? "text" : "password"}
-                              required
-                              className={`w-full ${theme.inputWrapperBg} border ${theme.sidebarBorder} rounded-xl p-3 md:p-4 pr-12 outline-none focus:${accent.border} transition ${theme.textPrimary} shadow-inner text-sm`}
-                              value={password}
-                              onChange={(e) => setPassword(e.target.value)}
-                          />
-                          <button
-                              type="button"
-                              onClick={() => setShowPassword(!showPassword)}
-                              className={`absolute right-4 top-[36px] md:top-[38px] ${theme.textSecondary} hover:${theme.textPrimary} transition focus:outline-none`}
-                          >
-                              {showPassword ?
-                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-                                  :
-                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                              }
-                          </button>
-                      </div>
-                  )}
-
-                  {authMode === 'login' && (
-                     <div className="text-right">
-                         <button type="button" onClick={() => {setAuthMode('forgot'); setAuthError(''); setAuthSuccess('');}} className={`text-[11px] ${accent.text} font-bold hover:underline`}>
-                             Forgot Password?
-                         </button>
-                     </div>
-                  )}
-                  
-                  {(authMode === 'signup' || authMode === 'reset') && (
-                      <div className={`p-3 md:p-4 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-100 border-slate-300'} space-y-2 mt-2 transition-all`}>
-                          <p className={`text-[9px] md:text-[10px] font-bold uppercase tracking-widest ${theme.textPrimary} mb-2`}>Password Requirements:</p>
-                          <div className="flex items-center gap-2 text-[11px] md:text-xs font-medium">
-                              {pwdReqs.length ? <span className="text-emerald-500 scale-110 transition-transform">✅</span> : <span className={theme.textSecondary}>⚪</span>}
-                              <span className={pwdReqs.length ? theme.textPrimary : theme.textSecondary}>At least 8 characters</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] md:text-xs font-medium">
-                              {pwdReqs.uppercase ? <span className="text-emerald-500 scale-110 transition-transform">✅</span> : <span className={theme.textSecondary}>⚪</span>}
-                              <span className={pwdReqs.uppercase ? theme.textPrimary : theme.textSecondary}>One uppercase letter</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] md:text-xs font-medium">
-                              {pwdReqs.number ? <span className="text-emerald-500 scale-110 transition-transform">✅</span> : <span className={theme.textSecondary}>⚪</span>}
-                              <span className={pwdReqs.number ? theme.textPrimary : theme.textSecondary}>One number</span>
-                          </div>
-                          <div className="flex items-center gap-2 text-[11px] md:text-xs font-medium">
-                              {pwdReqs.special ? <span className="text-emerald-500 scale-110 transition-transform">✅</span> : <span className={theme.textSecondary}>⚪</span>}
-                              <span className={pwdReqs.special ? theme.textPrimary : theme.textSecondary}>One special char (!@#$)</span>
-                          </div>
-                      </div>
-                  )}
-
-                  {(authMode === 'otp' || authMode === 'reset') && (
-                       <div>
-                          <label className={`text-[10px] ${theme.textSecondary} font-bold uppercase tracking-widest mb-2 block`}>Verification Code (OTP)</label>
-                          <input type="text" required maxLength="6" className={`w-full ${theme.inputWrapperBg} border ${theme.sidebarBorder} rounded-xl p-4 outline-none focus:${accent.border} transition text-center tracking-[10px] md:tracking-[15px] text-xl md:text-2xl font-mono ${theme.textPrimary} shadow-inner`} value={otp} onChange={e => setOtp(e.target.value)} />
-                      </div>
-                  )}
-
-                  {authError && <p className="text-red-500 text-[10px] md:text-xs text-center font-bold bg-red-500/10 py-2 md:py-2.5 rounded-lg border border-red-500/20"><ReactMarkdown>{authError}</ReactMarkdown></p>}
-                  {authSuccess && <p className="text-emerald-500 text-[10px] md:text-xs text-center font-bold bg-emerald-500/10 py-2 md:py-2.5 rounded-lg border border-emerald-500/20">{authSuccess}</p>}
-
-                  <button
-                      type="submit"
-                      disabled={authLoading || ((authMode === 'signup' || authMode === 'reset') && !isPasswordValid)}
-                      className={`w-full ${accent.bg} text-white font-extrabold py-3 md:py-4 rounded-xl transition active:scale-95 mt-2 shadow-[0_0_20px_rgba(0,0,0,0.2)] hover:opacity-90 text-sm md:text-base disabled:opacity-50 disabled:cursor-not-allowed`}
-                  >
-                      {authLoading ? 'Processing...' : (authMode === 'login' ? 'Secure Login' : authMode === 'signup' ? 'Create Account' : authMode === 'forgot' ? 'Send Reset Link' : 'Verify & Continue')}
-                  </button>
-              </form>
-
-              <div className="mt-6 text-center text-[11px] md:text-xs font-medium">
-                  {authMode === 'login' ? (
-                      <p className={theme.textSecondary}>New here? <button onClick={() => {setAuthMode('signup'); setAuthError(''); setAuthSuccess(''); setPassword('');}} className={`${accent.text} hover:opacity-80 font-bold ml-1`}>Create an account</button></p>
-                  ) : (authMode === 'signup' || authMode === 'forgot' || authMode === 'reset') ? (
-                      <p className={theme.textSecondary}>Remembered password? <button onClick={() => {setAuthMode('login'); setAuthError(''); setAuthSuccess(''); setPassword(''); setOtp('');}} className={`${accent.text} hover:opacity-80 font-bold ml-1`}>Sign in</button></p>
-                  ) : (
-                      <p className={theme.textSecondary}>OTP is sent via secure SMTP. Check spam if not found.</p>
-                  )}
-              </div>
-           </div>
-         </div>
-      )}
-
-      {/* INCOGNITO DISCLAIMER */}
-      {showTempDisclaimer && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-xl z-[100] flex items-center justify-center p-6 animate-fade-in">
-          <div className="absolute inset-0 bg-indigo-950/20 w-[300px] h-[300px] md:w-[400px] md:h-[400px] blur-[150px] mx-auto my-auto rounded-full pointer-events-none"></div>
-          <div className={`bg-[#111111]/90 backdrop-blur-lg border border-indigo-700/50 p-6 md:p-10 rounded-3xl max-w-lg text-center shadow-2xl relative z-10 border-indigo-900 border-4`}>
-            
-            {/* The Cancel Button */}
-            <button onClick={cancelTempChat} className={`absolute top-4 right-5 text-indigo-400 hover:text-white transition p-2 rounded-full font-extrabold text-xl`}>
-                ✖
-            </button>
-
-            <div className="w-20 h-20 md:w-24 md:h-24 bg-indigo-500/20 text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-6 md:mb-8 border border-indigo-700/40 animate-pulse">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 12h3M19 12h3M12 2v3M12 19v3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg>
+              <button
+                onClick={() => setActivePage('chat')}
+                className={`w-full sm:w-auto px-8 py-3.5 rounded-2xl font-heading font-bold text-xs uppercase tracking-wider border ${
+                  isDark ? 'border-zinc-800 bg-zinc-900 text-white' : 'border-zinc-300 bg-white text-zinc-900'
+                }`}
+              >
+                Chat with Rider / Support 💬
+              </button>
             </div>
-            <h2 className="text-2xl md:text-3xl font-extrabold mb-3 md:mb-5 text-white tracking-tighter">Incognito Mode</h2>
-            <p className="text-indigo-200 text-sm md:text-md leading-relaxed mb-8 md:mb-10 tracking-tight">
-              You are entering **Incognito Mode**. Messages will not be saved to history and will vanish when you leave.
-            </p>
-            {/* The Confirm Button */}
-            <button onClick={confirmIncognito} className="w-full bg-white hover:bg-neutral-200 text-black font-extrabold py-3 md:py-4 rounded-xl transition active:scale-95 shadow-xl text-sm md:text-lg">
-              I Understand
-            </button>
+          </motion.div>
+        )}
+
+      </main>
+
+      {/* --- 🥂 TOAST NOTIFICATION --- */}
+      <AnimatePresence>
+        {toastText && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl border flex items-center gap-2.5 text-xs font-heading font-bold shadow-lg ${
+              isDark ? 'bg-zinc-900 border-zinc-700 text-white' : 'bg-white border-zinc-300 text-zinc-900'
+            }`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            <span>{toastText}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* --- 👑 FOOTER --- */}
+      <footer className={`border-t py-8 px-4 mt-auto transition-colors ${
+        isDark ? 'bg-[#050507] border-zinc-800/80 text-zinc-500' : 'bg-white border-zinc-200 text-zinc-400'
+      }`}>
+        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-heading">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-zinc-900 dark:text-zinc-200">ZAIQA GRILL & FAST FOOD</span>
+            <span>• Karachi, Pakistan</span>
+          </div>
+          <div className="flex items-center gap-4 font-mono text-[11px]">
+            <span>Fast Food Delivery</span>
+            <span>•</span>
+            <span>Multi-Tier WhatsApp AI</span>
           </div>
         </div>
-      )}
-      <Analytics />
-    </>
+      </footer>
+
+    </div>
   );
 }

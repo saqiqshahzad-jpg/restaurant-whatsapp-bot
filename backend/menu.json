@@ -1,0 +1,589 @@
+{
+  "restaurant_name": "Zaiqa Grill & Fast Food",
+  "currency": "PKR",
+  "currency_symbol": "Rs.",
+  "delivery_fee": 150,
+  "estimated_delivery_time": "30-40 mins",
+  "upsell_recommendations": [
+    "Signature Loaded Fries",
+    "Electric Mint Margarita",
+    "Crispy Spicy Hot Wings",
+    "Warm Nutella Fudge Brownie"
+  ],
+  "categories": [
+    "Burgers & Sandwiches",
+    "Rice & Biryani Royal",
+    "Crispy Fried & Broast",
+    "BBQ & Charcoal Grill",
+    "Paratha Rolls & Wraps",
+    "Artisanal Pizza & Calzones",
+    "Loaded Fries & Starters",
+    "Beverages & Chilled Coolers",
+    "Desserts & Sweet Delights",
+    "Value Deals & Combos"
+  ],
+  "items": [
+    {
+      "id": "crispy_zinger",
+      "name": "Crispy Zinger Burger",
+      "category": "Burgers & Sandwiches",
+      "tag": "Bestseller 🔥",
+      "image": "/images/zinger.jpg",
+      "description": "Crispy golden fried marinated chicken breast fillet topped with crunchy iceberg lettuce, signature secret mayo sauce in a toasted sesame brioche bun.",
+      "base_price": 550,
+      "variants": {
+        "Regular": 550,
+        "Cheese Lava": 650,
+        "Double Decker": 850
+      },
+      "keywords": [
+        "zinger",
+        "burger",
+        "crispy",
+        "crispy burger",
+        "crispy zinger",
+        "cheese lava",
+        "zinger burger",
+        "chicken burger",
+        "double zinger",
+        "double decker",
+        "cheesy zinger"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "beef_smash_burger",
+      "name": "Gourmet Beef Smash Burger",
+      "category": "Burgers & Sandwiches",
+      "tag": "Chef Special 👑",
+      "image": "/images/beef_burger.jpg",
+      "description": "100% prime beef patty smashed on a smoking hot griddle with crispy caramelized edges, melted American cheddar cheese, caramelized onions, and house smokey BBQ dip.",
+      "base_price": 750,
+      "variants": {
+        "Single Patty": 750,
+        "Double Patty Cheese": 990
+      },
+      "keywords": [
+        "beef burger",
+        "smash burger",
+        "beef smash",
+        "cheese burger",
+        "double beef",
+        "patty",
+        "beef patty"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "classic_club_sandwich",
+      "name": "Royal Club Sandwich",
+      "category": "Burgers & Sandwiches",
+      "tag": "Classic 🥪",
+      "image": "/images/club_sandwich.jpg",
+      "description": "Triple-decker toasted sandwich layered with shredded roast chicken, sunny side egg, melted cheddar, crisp cucumbers, ripe tomatoes, and spicy garlic mayo. Served with potato crisps.",
+      "base_price": 590,
+      "variants": {
+        "Regular": 590,
+        "With Cheese": 670
+      },
+      "keywords": [
+        "club sandwich",
+        "sandwich",
+        "chicken sandwich",
+        "egg sandwich",
+        "triple decker"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "special_biryani",
+      "name": "Special Chicken Biryani",
+      "category": "Rice & Biryani Royal",
+      "tag": "Tradition 👑",
+      "image": "/images/biryani.jpg",
+      "description": "World-famous long-grain basmati sella rice slow-cooked in artisanal clay handi with succulent chicken pieces, saffron aromatics, golden potatoes, and secret Zaiqa spices.",
+      "base_price": 400,
+      "variants": {
+        "Single": 400,
+        "Double": 750,
+        "Single Mild": 400,
+        "Single Spicy": 400,
+        "Double Mild": 750,
+        "Double Spicy": 750
+      },
+      "keywords": [
+        "biryani",
+        "chicken biryani",
+        "chawal",
+        "rice",
+        "single biryani",
+        "double biryani",
+        "spicy biryani",
+        "mild biryani",
+        "dum biryani"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "tikka_biryani",
+      "name": "Charcoal Chicken Tikka Biryani",
+      "category": "Rice & Biryani Royal",
+      "tag": "Smokey Flavor 🍗",
+      "image": "/images/tikka_biryani.jpg",
+      "description": "Fragrant saffron basmati rice layered with smoky charcoal-grilled tender boneless chicken tikka boti, spicy masala gravy, caramelized onions, and fresh mint leaves.",
+      "base_price": 550,
+      "variants": {
+        "Single": 550,
+        "Double": 950
+      },
+      "keywords": [
+        "tikka biryani",
+        "bbq biryani",
+        "smokey biryani",
+        "boneless biryani"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "crispy_broast",
+      "name": "Crispy Golden Chicken Broast",
+      "category": "Crispy Fried & Broast",
+      "tag": "Extra Crunchy 🍗",
+      "image": "/images/broast.jpg",
+      "description": "Fresh bone-in chicken deeply pressure-fried to golden crispy perfection with our proprietary 11-spice batter. Ultra juicy on the inside, crackling crunchy on the outside. Served with garlic dip and bun.",
+      "base_price": 520,
+      "variants": {
+        "Quarter Leg": 520,
+        "Quarter Chest": 560,
+        "Half 4 Pcs": 990
+      },
+      "keywords": [
+        "broast",
+        "fried chicken",
+        "quarter broast",
+        "leg piece",
+        "chest piece",
+        "half broast",
+        "chicken broast",
+        "crunchy chicken"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "hot_wings",
+      "name": "Crispy Spicy Hot Wings",
+      "category": "Crispy Fried & Broast",
+      "tag": "Fiery 🌶️",
+      "image": "/images/wings.jpg",
+      "description": "Tender chicken wings coated in super crispy spicy crust, tossed in your choice of Spicy Buffalo or Sweet Honey Garlic sauce.",
+      "base_price": 450,
+      "variants": {
+        "6 Pieces": 450,
+        "10 Pieces": 720
+      },
+      "keywords": [
+        "wings",
+        "hot wings",
+        "spicy wings",
+        "crispy wings",
+        "buffalo wings",
+        "chicken wings"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "chicken_malai_boti",
+      "name": "Chicken Malai Boti Plate",
+      "category": "BBQ & Charcoal Grill",
+      "tag": "Melt in Mouth 🍢",
+      "image": "/images/malai_boti.jpg",
+      "description": "Tender boneless chicken cubes marinated overnight in heavy cream, green cardamom, white pepper, and roasted garlic, char-grilled over natural coals.",
+      "base_price": 680,
+      "variants": {
+        "Half Plate (6 Pcs)": 680,
+        "Full Plate (12 Pcs)": 1250
+      },
+      "keywords": [
+        "malai boti",
+        "boti",
+        "bbq",
+        "chicken boti",
+        "cream boti",
+        "malai chicken",
+        "barbeque"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "chicken_tikka_piece",
+      "name": "Charcoal Chicken Tikka Piece",
+      "category": "BBQ & Charcoal Grill",
+      "tag": "Traditional BBQ 🌶️",
+      "image": "/images/tikka.jpg",
+      "description": "Traditional quarter chicken leg or breast steeped in authentic red tandoori masala with ginger and crushed red chili, flame-grilled on coal skewers. Served with mint raita.",
+      "base_price": 380,
+      "variants": {
+        "Leg Piece": 380,
+        "Chest Piece": 420
+      },
+      "keywords": [
+        "tikka",
+        "chicken tikka",
+        "tikka leg",
+        "tikka chest",
+        "tandoori tikka",
+        "charcoal tikka"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "seekh_kabab_plate",
+      "name": "Smokey Beef Seekh Kabab",
+      "category": "BBQ & Charcoal Grill",
+      "tag": "Juicy 🍢",
+      "image": "/images/seekh_kabab.jpg",
+      "description": "Minced beef infused with chopped green chilies, coriander seeds, cumin, and onion, skewered and coal-roasted to juicy perfection. (4 skewers per plate)",
+      "base_price": 650,
+      "variants": {
+        "Regular (4 Pcs)": 650
+      },
+      "keywords": [
+        "seekh kabab",
+        "kabab",
+        "beef kabab",
+        "seekh",
+        "kebab"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "zinger_paratha_roll",
+      "name": "Crispy Zinger Paratha Roll",
+      "category": "Paratha Rolls & Wraps",
+      "tag": "Street Favorite 🌯",
+      "image": "/images/zinger_roll.jpg",
+      "description": "Fresh golden flaky crispy paratha wrapped around crunchy zinger strips, layered with shredded cabbage, tangy garlic mayo, and spiced chipotle drizzle.",
+      "base_price": 380,
+      "variants": {
+        "Regular": 380,
+        "Cheese Loaded": 460
+      },
+      "keywords": [
+        "zinger roll",
+        "paratha roll",
+        "roll",
+        "zinger paratha",
+        "crispy roll",
+        "chicken roll"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "malai_boti_roll",
+      "name": "Chicken Malai Boti Paratha Roll",
+      "category": "Paratha Rolls & Wraps",
+      "tag": "Creamy Delight 🌯",
+      "image": "/images/malai_roll.jpg",
+      "description": "Charcoal grilled creamy boneless malai boti rolled in hot flaky paratha with sliced rings of purple onion and mint coriander garlic chutney.",
+      "base_price": 420,
+      "variants": {
+        "Regular": 420,
+        "With Cheese": 500
+      },
+      "keywords": [
+        "malai roll",
+        "malai boti roll",
+        "boti roll",
+        "creamy roll"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "chicken_tikka_pizza",
+      "name": "Chicken Tikka Supreme Pizza",
+      "category": "Artisanal Pizza & Calzones",
+      "tag": "Desi Italian 🍕",
+      "image": "/images/tikka_pizza.jpg",
+      "description": "Hand-stretched dough topped with rich Italian tomato herb sauce, 100% pure mozzarella cheese, spicy grilled chicken tikka chunks, diced onions, bell peppers, and oregano.",
+      "base_price": 650,
+      "variants": {
+        "Small 7-inch": 650,
+        "Medium 10-inch": 1150,
+        "Large 13-inch": 1650
+      },
+      "keywords": [
+        "pizza",
+        "tikka pizza",
+        "chicken pizza",
+        "small pizza",
+        "medium pizza",
+        "large pizza",
+        "supreme pizza"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "fajita_sicilian_pizza",
+      "name": "Chicken Fajita Sicilian Pizza",
+      "category": "Artisanal Pizza & Calzones",
+      "tag": "Spicy & Cheesy 🍕",
+      "image": "/images/fajita_pizza.jpg",
+      "description": "Signature crust baked with spicy Mexican fajita chicken, jalapeno rounds, sweet bell peppers, caramelized onions, black olives, and double mozzarella blend.",
+      "base_price": 690,
+      "variants": {
+        "Small 7-inch": 690,
+        "Medium 10-inch": 1250,
+        "Large 13-inch": 1750
+      },
+      "keywords": [
+        "fajita pizza",
+        "sicilian pizza",
+        "spicy pizza",
+        "jalapeno pizza"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "loaded_fries",
+      "name": "Signature Loaded Fries",
+      "category": "Loaded Fries & Starters",
+      "tag": "Must Try 🍟",
+      "image": "/images/fries.jpg",
+      "description": "Crisp skin-on golden potato fries smothered in warm liquid cheddar cheese sauce, garlic mayo, spicy diced jalapenos, paprika sprinkles, and crispy chicken bits.",
+      "base_price": 450,
+      "variants": {
+        "Mayo Garlic": 450,
+        "Jalapeno Cheese": 450,
+        "BBQ Smokey": 520
+      },
+      "keywords": [
+        "fries",
+        "loaded fries",
+        "chips",
+        "finger chips",
+        "mayo garlic",
+        "jalapeno cheese",
+        "french fries",
+        "cheese fries"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "plain_crispy_fries",
+      "name": "Classic Golden Fries",
+      "category": "Loaded Fries & Starters",
+      "tag": "Crispy 🍟",
+      "image": "/images/plain_fries.jpg",
+      "description": "Double-fried golden shoestring potatoes tossed in sea salt or tangy Chaat Masala seasoning.",
+      "base_price": 250,
+      "variants": {
+        "Regular": 250,
+        "Large": 390
+      },
+      "keywords": [
+        "plain fries",
+        "salted fries",
+        "simple fries",
+        "regular fries",
+        "large fries"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "mozzarella_sticks",
+      "name": "Gooey Mozzarella Cheese Sticks",
+      "category": "Loaded Fries & Starters",
+      "tag": "Cheese Pull 🧀",
+      "image": "/images/mozzarella_sticks.jpg",
+      "description": "Real Italian mozzarella cheese batons breaded in seasoned Italian breadcrumbs, fried till golden brown with an irresistible cheese pull. (5 pieces with marinara dip)",
+      "base_price": 490,
+      "variants": {
+        "5 Pieces": 490
+      },
+      "keywords": [
+        "mozzarella sticks",
+        "cheese sticks",
+        "cheese fingers"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "mint_margarita",
+      "name": "Electric Mint Margarita",
+      "category": "Beverages & Chilled Coolers",
+      "tag": "Refreshing ❄️",
+      "image": "/images/margarita.jpg",
+      "description": "Chilled electric cooler blended with garden-fresh mint leaves, fresh lemon juice, crushed glacier ice crystals, and sparkling soda.",
+      "base_price": 150,
+      "variants": {
+        "Regular Glass": 150,
+        "Pitcher 1 Litre": 390
+      },
+      "keywords": [
+        "mint margarita",
+        "margarita",
+        "mint drink",
+        "lemon mint",
+        "cooler",
+        "mint lemonade"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "cold_drink",
+      "name": "Chilled Soft Drinks",
+      "category": "Beverages & Chilled Coolers",
+      "tag": "Ice Cold 🥤",
+      "image": "/images/margarita.jpg",
+      "description": "Ice-cold carbonated refreshing canned beverages.",
+      "base_price": 150,
+      "variants": {
+        "Regular Can 345ml": 150,
+        "Coke Can 345ml": 150,
+        "Sprite Can 345ml": 150,
+        "Fanta Can 345ml": 150,
+        "Jumbo Bottle 1.5 Litre": 260
+      },
+      "keywords": [
+        "drink",
+        "cold drink",
+        "coke",
+        "sprite",
+        "fanta",
+        "pepsi",
+        "soda",
+        "1.5 litre",
+        "coca cola"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "mineral_water",
+      "name": "Purified Mineral Water",
+      "category": "Beverages & Chilled Coolers",
+      "tag": "Pure 💧",
+      "image": "/images/water.jpg",
+      "description": "Chilled pure mineral water bottle.",
+      "base_price": 70,
+      "variants": {
+        "Small 500ml": 70,
+        "Large 1.5 Litre": 120
+      },
+      "keywords": [
+        "water",
+        "mineral water",
+        "paani",
+        "pani",
+        "water bottle"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "nutella_brownie",
+      "name": "Warm Nutella Fudge Brownie",
+      "category": "Desserts & Sweet Delights",
+      "tag": "Decadent 🍫",
+      "image": "/images/brownie.jpg",
+      "description": "Dense chocolate fudge brownie served piping hot, smothered with authentic hazelnut Nutella spread and crunchy roasted almonds.",
+      "base_price": 380,
+      "variants": {
+        "Regular Slice": 380,
+        "With Vanilla Ice Cream": 490
+      },
+      "keywords": [
+        "brownie",
+        "nutella brownie",
+        "dessert",
+        "sweet",
+        "meetha",
+        "ice cream",
+        "chocolate brownie"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "shahi_kheer",
+      "name": "Matka Shahi Kheer",
+      "category": "Desserts & Sweet Delights",
+      "tag": "Royal Tradition 🍮",
+      "image": "/images/kheer.jpg",
+      "description": "Authentic Mughlai rice pudding slow-simmered in buffalo whole milk for hours with saffron, rose essence, green cardamom, garnished with silver vark and crushed pistachios in clay matka.",
+      "base_price": 280,
+      "variants": {
+        "Single Matka": 280
+      },
+      "keywords": [
+        "kheer",
+        "shahi kheer",
+        "matka kheer",
+        "sweet dish",
+        "pudding"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "deal_solo_zinger",
+      "name": "Deal 1: Solo Zinger Combo",
+      "category": "Value Deals & Combos",
+      "tag": "Super Saver ⭐",
+      "image": "/images/deal1.jpg",
+      "description": "1 Crispy Zinger Burger (Regular) + 1 Golden Fries (Regular) + 1 Chilled Cold Drink Can (345ml). Complete meal satisfaction!",
+      "base_price": 790,
+      "variants": {
+        "Standard Deal": 790,
+        "Upgrade to Cheese Lava": 890
+      },
+      "keywords": [
+        "deal 1",
+        "deal one",
+        "solo zinger deal",
+        "zinger combo",
+        "zinger meal",
+        "solo deal"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "deal_biryani_feast",
+      "name": "Deal 2: Biryani Royal Feast",
+      "category": "Value Deals & Combos",
+      "tag": "Desi Combo 🍗",
+      "image": "/images/deal2.jpg",
+      "description": "1 Double Special Chicken Biryani (Spicy) + 1 Chicken Tikka Piece + 1 Cold Drink Can (345ml) + Fresh Mint Raita & Salad.",
+      "base_price": 1150,
+      "variants": {
+        "Standard Deal": 1150
+      },
+      "keywords": [
+        "deal 2",
+        "deal two",
+        "biryani deal",
+        "biryani combo",
+        "feast deal"
+      ],
+      "is_available": true
+    },
+    {
+      "id": "deal_family_mega",
+      "name": "Deal 3: Family Mega Party Box",
+      "category": "Value Deals & Combos",
+      "tag": "Family Feast 👨‍👩‍👧‍👦",
+      "image": "/images/deal3.jpg",
+      "description": "4 Crispy Zinger Burgers (Regular) + 1 Large Signature Loaded Fries + 6 Pcs Crispy Hot Wings + 1 Jumbo Cold Drink Bottle (1.5 Litre). Feeds 4-5 persons!",
+      "base_price": 2990,
+      "variants": {
+        "Family Box": 2990
+      },
+      "keywords": [
+        "deal 3",
+        "deal three",
+        "family deal",
+        "mega deal",
+        "party box",
+        "family box",
+        "family combo"
+      ],
+      "is_available": true
+    }
+  ]
+}
