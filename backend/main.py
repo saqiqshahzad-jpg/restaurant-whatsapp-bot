@@ -5,6 +5,8 @@ import json
 import re
 import logging
 import requests
+import copy
+from typing import Any, Optional, Dict, List, Tuple
 
 # Reconfigure stdout/stderr for UTF-8 on Windows terminal
 if sys.platform == "win32":
@@ -51,14 +53,20 @@ try:
         detect_foreign_language,
         build_language_switch_offer,
         is_smart_language_confirmation,
-        LANGUAGES_CONFIG
+        LANGUAGES_CONFIG,
+        normalize_lang,
+        get_template,
+        get_buttons
     )
 except ImportError:
     from backend.language_helper import (
         detect_foreign_language,
         build_language_switch_offer,
         is_smart_language_confirmation,
-        LANGUAGES_CONFIG
+        LANGUAGES_CONFIG,
+        normalize_lang,
+        get_template,
+        get_buttons
     )
 
 SPEED_OK_GIF_URL = "https://media.giphy.com/media/tsX3YMWYzDPjAARfeg/giphy.gif"
@@ -227,30 +235,134 @@ def calculate_cart_totals(cart: dict) -> dict:
         "grand_total": grand_total
     }
 
-def add_item_to_cart(cart: dict, name: str, variant: str, qty: int, unit_price: int, notes: str = "") -> dict:
-    """Add or increment an item in the cart and recalculate totals."""
+def is_valid_delivery_address(text: Any) -> bool:
+    """
+    Validates if text is a plausible physical delivery address.
+    Strictly rejects buttons, placeholders, single words, greetings, numbers-only, or tiny text.
+    """
+    if not text:
+        return False
+    clean = str(text).strip().lower()
+    
+    invalid_exact = {
+        "continue", "next", "ok", "okay", "yes", "haan", "skip", "cancel", "done",
+        "confirm", "address", "delivery", "btn_continue", "btn_next", "1", "2",
+        "order", "menu", "hi", "hello", "salam", "shukriya", "thanks", "track order",
+        "track", "status", "naya order", "new order", "kripya", "kripya apna address"
+    }
+    if clean in invalid_exact:
+        return False
+        
+    # Check length: real physical address must be at least 6 characters
+    if len(clean) < 6:
+        return False
+        
+    # Must have at least some alphanumeric characters
+    if not any(c.isalnum() for c in clean):
+        return False
+        
+    # Check for known address indicators OR multi-word descriptor
+    address_keywords = [
+        "house", "flat", "street", "gali", "road", "block", "sector", "phase",
+        "near", "opposite", "floor", "building", "mohallah", "colony", "town",
+        "f-", "g-", "i-", "e-", "h-", "dha", "bahria", "gulberg", "johar", "clifton",
+        "nazimabad", "cantt", "model town", "canal", "chowk", "bazaar", "islamabad",
+        "lahore", "karachi", "rawalpindi", "pindi", "peshawar", "faisalabad", "multan"
+    ]
+    has_keyword = any(kw in clean for kw in address_keywords)
+    words = clean.split()
+    if len(words) >= 2 or has_keyword:
+        return True
+        
+    return False
+
+def is_valid_customer_name(text: Any) -> bool:
+    """
+    Validates if text is a plausible personal name.
+    Strictly rejects buttons, placeholders, numbers-only, addresses, or generic commands.
+    """
+    if not text:
+        return False
+    clean = str(text).strip().lower()
+    
+    invalid_exact = {
+        "continue", "next", "ok", "okay", "yes", "haan", "skip", "cancel", "done",
+        "confirm", "name", "address", "cash", "cod", "online", "card", "transfer",
+        "btn_continue", "btn_next", "1", "2", "order", "menu", "hi", "hello", "salam",
+        "track order", "track", "status", "naya order", "new order"
+    }
+    if clean in invalid_exact:
+        return False
+        
+    # Reject pure numbers or symbols
+    letters = re.findall(r'[a-zA-Z\u0600-\u06FF\u0900-\u097F]', clean)
+    if len(letters) < 2:
+        return False
+        
+    # Name should not look like a street address
+    if any(kw in clean for kw in ["house", "flat", "street", "gali", "sector", "road", "floor"]):
+        return False
+        
+    return True
+
+def add_item_to_cart(cart: dict, name: str, variant: str, qty: int, unit_price: int, notes: str = "", force_update: bool = False) -> dict:
+    """
+    Add, increment, or refine an item in the cart and recalculate totals.
+    If the customer chooses a variant (e.g. Single Spicy) for an item that already exists
+    with a base variant (e.g. Single or Regular), it updates the variant instead of adding
+    a duplicate item!
+    """
     cart_data = calculate_cart_totals(cart)
     items = cart_data["items"]
 
-    found = False
+    # 1. Exact match on name & variant -> increment quantity (or force update)
     for it in items:
         if it["name"].lower() == name.lower() and it["variant"].lower() == variant.lower():
-            it["qty"] += qty
+            if force_update:
+                it["qty"] = qty
+                it["unit_price"] = unit_price
+            else:
+                it["qty"] += qty
             if notes and notes not in it["notes"]:
                 it["notes"] = f"{it['notes']}, {notes}".strip(", ")
             it["line_total"] = it["qty"] * it["unit_price"]
-            found = True
-            break
+            return calculate_cart_totals({"items": items})
 
-    if not found:
-        items.append({
-            "name": name,
-            "variant": variant,
-            "qty": qty,
-            "unit_price": unit_price,
-            "line_total": qty * unit_price,
-            "notes": notes
-        })
+    # 2. Variant Refinement on existing item of same dish (e.g. "Single" -> "Single Spicy")
+    base_variants = {"regular", "single", "standard", "default", "unspecified", "half", "full"}
+    for it in items:
+        if it["name"].lower() == name.lower():
+            existing_var = it["variant"].lower()
+            new_var = variant.lower()
+            
+            is_refinement = (
+                force_update or
+                existing_var in base_variants or
+                existing_var in new_var or
+                new_var in existing_var or
+                (existing_var.startswith("single") and new_var.startswith("single")) or
+                (existing_var.startswith("double") and new_var.startswith("double"))
+            )
+            if is_refinement:
+                it["variant"] = variant
+                it["unit_price"] = unit_price
+                if qty > 1 and it["qty"] == 1:
+                    it["qty"] = qty
+                it["line_total"] = it["qty"] * it["unit_price"]
+                if notes and notes not in it["notes"]:
+                    it["notes"] = f"{it['notes']}, {notes}".strip(", ")
+                log_ok("CART_VARIANT_REFINED", f"Refined {name} variant: '{existing_var}' -> '{variant}' (Qty: {it['qty']}, Price: {unit_price})")
+                return calculate_cart_totals({"items": items})
+
+    # 3. Add brand new item
+    items.append({
+        "name": name,
+        "variant": variant,
+        "qty": qty,
+        "unit_price": unit_price,
+        "line_total": qty * unit_price,
+        "notes": notes
+    })
 
     return calculate_cart_totals({"items": items})
 
@@ -789,30 +901,30 @@ def format_menu_text() -> str:
     """Format official restaurant menu into a WhatsApp-friendly card directly from menu.json."""
     return menu_manager.get_whatsapp_menu_text()
 
-def can_confirm_order(cart: dict, details: dict) -> tuple:
+def can_confirm_order(cart: dict, details: dict, lang: str = "Roman_Urdu") -> tuple:
     """
     Strict server-side gatekeeper: Order CANNOT be confirmed unless:
     1. Cart has items (items count > 0)
-    2. Delivery address is provided and at least 5 chars
-    3. Customer name is provided and at least 2 chars
+    2. Delivery address is valid (not buttons/placeholders, min 6 chars)
+    3. Customer name is valid (min 2 letters)
     4. Payment method is chosen (Cash on Delivery or Online Transfer)
     Returns: (can_confirm: bool, prompt_text: str, buttons: list)
     """
     items = cart.get("items", []) if isinstance(cart, dict) else []
     if not items:
-        return False, "Aapka cart abhi bilkul khali hai ustaad! 🛒 Pehle menu mein se kuch garma garam pasand karein:", ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+        return False, get_template("cart_empty", lang), get_buttons("menu", lang)
     
-    addr = str(details.get("delivery_address") or "").strip()
-    if len(addr) < 5:
-        return False, "📍 Rider ko aapke ghar pohnchane ke liye apna *Mukammal Delivery Address* share karein (House/Flat #, Gali, Area):", []
+    addr = details.get("delivery_address")
+    if not is_valid_delivery_address(addr):
+        return False, get_template("address_invalid", lang), []
         
-    name = str(details.get("customer_name") or "").strip()
-    if len(name) < 2:
-        return False, "Rider ki asani ke liye baraye meharbani apna *Pura Naam* bata dein 👤", []
+    name = details.get("customer_name")
+    if not is_valid_customer_name(name):
+        return False, get_template("name_invalid", lang), []
         
     pm = str(details.get("payment_method") or "").strip()
     if not pm:
-        return False, "Payment method select karein: Cash on Delivery ya Online Transfer? 💳", ["Cash on Delivery 💵", "Online Transfer 💳"]
+        return False, get_template("payment_request", lang, customer_name=str(name)), get_buttons("payment", lang)
         
     return True, "", []
 
@@ -820,13 +932,14 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
     """
     Deterministic state machine and rule-based order taker.
     Ensures 100% reliable cart building, calculations, and checkout transitions,
-    dynamically synchronized with menu.json with funny, charming street-smart Roman Urdu tone.
+    dynamically synchronized with menu.json with funny, charming multi-lingual support.
     """
     msg_lower = msg.lower().strip()
     current_state = session.get("order_state", OrderState.BROWSING_MENU)
     cart = calculate_cart_totals(session.get("customer_cart", {}))
     details = session.get("customer_details", {})
     r_name = menu_manager.get_restaurant_name()
+    cur_lang = session.get("current_language", "Roman Urdu")
 
     # Reset trigger
     if msg_lower in ["/reset", "reset", "clear"]:
@@ -835,17 +948,17 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
         session.clear()
         session.update(new_session)
         return {
-            "reply_text": f"🔄 *Session Reset!* Khush amdeed {r_name} mein ustaad! 🍔 Aaj kya khane ka mood ban raha hai?",
-            "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Biryani 🍗"],
+            "reply_text": get_template("locked_welcome", cur_lang),
+            "buttons": get_buttons("menu", cur_lang),
             "order_state": OrderState.BROWSING_MENU,
             "cart": calculate_cart_totals({})
         }
 
     # Explicit menu trigger
-    if btn_id == "btn_view_menu" or any(w in msg_lower for w in ["menu", "list", "kya hai", "items", "kya mil", "kya hai menu"]):
+    if btn_id == "btn_view_menu" or any(w in msg_lower for w in ["menu", "list", "kya hai", "items", "kya mil", "kya hai menu", "speisekarte", "cardapio"]):
         return {
             "reply_text": format_menu_text(),
-            "buttons": ["Crispy Zinger 🍔", "Biryani 🍗", "Loaded Fries 🍟"],
+            "buttons": get_buttons("menu", cur_lang),
             "order_state": OrderState.BROWSING_MENU,
             "cart": cart
         }
@@ -854,16 +967,13 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
     if btn_id == "btn_checkout" or any(w in msg_lower for w in ["checkout", "finalize", "bill", "check out"]):
         if not cart["items"]:
             return {
-                "reply_text": "Aapka cart abhi bilkul khali hai jani! 🛒 Pehle menu mein se kuch lazeez pasand karein:",
-                "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"],
+                "reply_text": get_template("cart_empty", cur_lang),
+                "buttons": get_buttons("menu", cur_lang),
                 "order_state": OrderState.BROWSING_MENU,
                 "cart": cart
             }
         return {
-            "reply_text": (
-                f"🛒 *Aapka Total Cart:* Rs. {cart['grand_total']} (Delivery Rs. {cart['delivery_fee']} shamil hai).\n\n"
-                "Rider ko aapke ghar pohnchane ke liye apna *Mukammal Delivery Address* share karein (House/Flat #, Gali, Area) 📍"
-            ),
+            "reply_text": get_template("address_request", cur_lang, grand_total=cart["grand_total"], delivery_fee=cart["delivery_fee"]),
             "buttons": [],
             "order_state": OrderState.COLLECTING_DETAILS,
             "cart": cart
@@ -893,35 +1003,50 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
 
     # Handling COLLECTING_DETAILS state
     if current_state == OrderState.COLLECTING_DETAILS:
-        if not details.get("delivery_address"):
-            details["delivery_address"] = msg.strip()
-            session["customer_details"] = details
-            return {
-                "reply_text": "📍 Address note ho gaya ustaad! Rider ki asani ke liye apna *Pura Naam* bata dein 👤",
-                "buttons": [],
-                "order_state": OrderState.COLLECTING_DETAILS,
-                "cart": cart
-            }
-        elif not details.get("customer_name"):
-            details["customer_name"] = msg.strip()
-            session["customer_details"] = details
-            return {
-                "reply_text": (
-                    f"Shukriya *{details['customer_name']}* bhai! 🤝\n"
-                    "Payment method select karein: Cash on Delivery ya Online Transfer?"
-                ),
-                "buttons": ["Cash on Delivery 💵", "Online Transfer 💳"],
-                "order_state": OrderState.COLLECTING_DETAILS,
-                "cart": cart
-            }
-        elif not details.get("payment_method") or any(w in msg_lower for w in ["cash", "cod", "online", "card", "transfer"]):
-            pm = "Cash on Delivery" if any(w in msg_lower for w in ["cash", "cod", "delivery"]) else "Online Transfer"
+        if not is_valid_delivery_address(details.get("delivery_address")):
+            if is_valid_delivery_address(msg):
+                details["delivery_address"] = msg.strip()
+                session["customer_details"] = details
+                return {
+                    "reply_text": get_template("name_request", cur_lang),
+                    "buttons": [],
+                    "order_state": OrderState.COLLECTING_DETAILS,
+                    "cart": cart
+                }
+            else:
+                return {
+                    "reply_text": get_template("address_invalid", cur_lang),
+                    "buttons": [],
+                    "order_state": OrderState.COLLECTING_DETAILS,
+                    "cart": cart
+                }
+        elif not is_valid_customer_name(details.get("customer_name")):
+            if is_valid_customer_name(msg):
+                details["customer_name"] = msg.strip()
+                session["customer_details"] = details
+                return {
+                    "reply_text": get_template("payment_request", cur_lang, customer_name=details["customer_name"]),
+                    "buttons": get_buttons("payment", cur_lang),
+                    "order_state": OrderState.COLLECTING_DETAILS,
+                    "cart": cart
+                }
+            else:
+                return {
+                    "reply_text": get_template("name_invalid", cur_lang),
+                    "buttons": [],
+                    "order_state": OrderState.COLLECTING_DETAILS,
+                    "cart": cart
+                }
+        elif not details.get("payment_method") or any(w in msg_lower for w in ["cash", "cod", "online", "card", "transfer", "الدفع", "كاش", "pago"]):
+            pm = "Cash on Delivery" if any(w in msg_lower for w in ["cash", "cod", "delivery", "الدفع", "كاش", "pago", "barzahlung", "efectivo"]) else "Online Transfer"
             details["payment_method"] = pm
             session["customer_details"] = details
 
             item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in cart["items"]])
+            header = get_template("order_summary_header", cur_lang)
+            prompt_confirm = get_template("order_confirm_prompt", cur_lang)
             summary = (
-                f"📋 *Order Summary Tayar Hai Ustaad:*\n"
+                f"{header}\n"
                 f"{item_lines}\n\n"
                 f"Subtotal: Rs. {cart['subtotal']}\n"
                 f"Delivery Fee: Rs. {cart['delivery_fee']}\n"
@@ -929,22 +1054,22 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
                 f"👤 Name: {details['customer_name']}\n"
                 f"📍 Address: {details['delivery_address']}\n"
                 f"💳 Payment: {details['payment_method']}\n\n"
-                "Ustaad kya main yeh order final kitchen ko bhej du? Confirm karein! 👨‍🍳🔥"
+                f"{prompt_confirm}"
             )
             return {
                 "reply_text": summary,
-                "buttons": ["Haan, Confirm Karein ✅", "Change Order ✏️"],
+                "buttons": get_buttons("confirm", cur_lang),
                 "order_state": OrderState.COLLECTING_DETAILS,
                 "cart": cart
             }
 
     # Handling Confirmation (Strict Non-Premature Gatekeeper)
     is_confirm_signal = (
-        btn_id in ["btn_confirm", "btn_haan_confirm_karein", "btn_haan,_confirm_karein_"] or
-        any(w in msg_lower for w in ["confirm", "order confirm", "haan confirm", "yes confirm", "haan kardo", "done confirm", "haan, confirm"])
+        btn_id in ["btn_confirm", "btn_haan_confirm_karein", "btn_haan,_confirm_karein_", "btn_yes,_confirm!_✅"] or
+        any(w in msg_lower for w in ["confirm", "order confirm", "haan confirm", "yes confirm", "haan kardo", "done confirm", "haan, confirm", "yes, confirm"])
     )
     if is_confirm_signal:
-        can_confirm, missing_msg, missing_btns = can_confirm_order(cart, details)
+        can_confirm, missing_msg, missing_btns = can_confirm_order(cart, details, lang=cur_lang)
         if not can_confirm:
             return {
                 "reply_text": missing_msg,
@@ -1047,15 +1172,82 @@ def process_customer_message(
     chat_hist = session.get("chat_history", [])
     cart = calculate_cart_totals(session.get("customer_cart", {}))
     details = session.get("customer_details", {})
+    last_confirmed_order = session.get("last_confirmed_order")
+
+    # 0A. Explicit New Order Trigger (Reset cart for a fresh order while preserving history)
+    is_new_order_trigger = (
+        btn_id in ["btn_naya_order_🍔", "btn_new_order_🍔", "btn_new_order", "btn_naya_order", "btn_start_new_order"] or
+        any(w in msg_lower for w in ["naya order", "new order", "order again", "start new order", "ek aur order"])
+    )
+    if is_new_order_trigger:
+        log_info("NEW_ORDER_TRIGGERED", f"Customer {clean_phone} initiated fresh new order")
+        if last_confirmed_order:
+            session.setdefault("order_history", []).append(last_confirmed_order)
+        session["order_state"] = OrderState.BROWSING_MENU
+        session["customer_cart"] = calculate_cart_totals({})
+        session["active_order_id"] = None
+        if session.get("customer_details"):
+            session["customer_details"]["payment_method"] = None
+        
+        reply = get_template("new_order_started", current_lang)
+        buttons = get_buttons("menu", current_lang)
+        
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": reply})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        return {
+            "reply_text": reply,
+            "buttons": buttons,
+            "order_state": OrderState.BROWSING_MENU,
+            "customer_cart": session["customer_cart"],
+            "customer_details": session["customer_details"],
+            "media_url": None,
+            "current_language": current_lang
+        }
+
+    # 0B. Live Order Tracking / Confirmed Cart Inspection Trigger
+    is_track_query = (
+        btn_id in ["btn_track_order_🛵", "btn_track_order", "btn_track", "btn_suivre_commande_🛵", "btn_lacak_pesanan_🛵"] or
+        any(w in msg_lower for w in ["track", "status", "kahan", "kitna time", "where is my order", "order status", "mera order", "kya mangwaya", "cart dikhao", "receipt"])
+    )
+    if (session.get("order_state") == OrderState.ORDER_CONFIRMED or is_track_query) and last_confirmed_order and not any(w in msg_lower for w in ["menu", "zinger", "biryani", "pizza", "burger", "fries"]):
+        log_info("TRACK_ORDER_SERVED", f"Served live order tracking to {clean_phone}")
+        ord_cart = last_confirmed_order.get("cart") or cart
+        ord_items = ord_cart.get("items", [])
+        item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in ord_items])
+        
+        reply = get_template(
+            "order_status",
+            current_lang,
+            order_id=last_confirmed_order.get("order_id", session.get("active_order_id", "ORD-LIVE")),
+            status=last_confirmed_order.get("status", "PREPARING"),
+            item_lines=item_lines,
+            grand_total=ord_cart.get("grand_total", 0),
+            address=last_confirmed_order.get("customer", {}).get("delivery_address", details.get("delivery_address", "Confirmed Address"))
+        )
+        buttons = get_buttons("tracking", current_lang)
+        
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": reply})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        return {
+            "reply_text": reply,
+            "buttons": buttons,
+            "order_state": OrderState.ORDER_CONFIRMED,
+            "customer_cart": ord_cart,
+            "customer_details": details,
+            "media_url": SPEED_OK_GIF_URL,
+            "current_language": current_lang
+        }
 
     # 1. Smart Language Switch Confirmation Check ('1' or Switch Button)
     if pending_lang and is_smart_language_confirmation(msg_body, btn_id, session):
-        target_conf = LANGUAGES_CONFIG.get(pending_lang, {})
         session["current_language"] = pending_lang
         session["pending_language"] = None
-        welcome_text = target_conf.get("locked_welcome", f"Zabardast! Ab hum {pending_lang} mein baat karein ge! 🍔")
-        btn_label = "Menu 📋" if pending_lang != "Roman_Urdu" else "Menu Dekhein 📋"
-        switch_buttons = [btn_label, "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+        welcome_text = get_template("locked_welcome", pending_lang)
+        switch_buttons = get_buttons("menu", pending_lang)
 
         log_ok("LANG_SWITCH_LOCKED", f"Customer {clean_phone} locked language to '{pending_lang}'")
         chat_hist.append({"role": "user", "content": msg_body})
@@ -1083,20 +1275,8 @@ def process_customer_message(
     ]
     if any(p in msg_lower for p in admin_hack_patterns):
         log_security("ADMIN_HACK_INTERCEPTED", f"Blocked admin/zero-payment bypass attempt from {clean_phone}: '{msg_body}'")
-        if current_lang == "English" and not any(w in msg_lower for w in ["hu", "hoon", "mein", "main", "malik", "karo", "do"]):
-            witty_reply = (
-                "Haha nice try! Even if you are the owner or the ultimate VIP, the kitchen system doesn't cook without payment! 😜\n\n"
-                "Here every customer is royalty, and every bite is delicious! What mouth-watering food are we getting for you today? 🍔🤤"
-            )
-            buttons = ["Menu 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"]
-        else:
-            witty_reply = (
-                "Haha ustaad, agar aap restaurant ke malik ya dunya ke sab se bare VIP bhi hain na, "
-                "tab bhi yeh software payment ke baghair kitchen ko order nahi bhejta! 😜\n\n"
-                "Yahan har customer hamare liye VIP hai aur har bite lazeez! "
-                "Chalein shabash, seedhe tareeqay se batayein kya khana hai? 🍔🤤"
-            )
-            buttons = ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"]
+        witty_reply = get_template("admin_hack", current_lang)
+        buttons = get_buttons("menu", current_lang)
 
         chat_hist.append({"role": "user", "content": msg_body})
         chat_hist.append({"role": "assistant", "content": witty_reply})
@@ -1117,12 +1297,8 @@ def process_customer_message(
     # 3. Abuse / Profanity Sanitization (Preserve Cart & Memory, Deflect with Food Humor)
     cleaned_body, had_abuse = sanitize_and_extract(msg_body)
     if had_abuse:
-        log_warn("ABUSE_SANITIZED", f"Sanitized abusive language from {clean_phone}. Preserving cart ({len(cart['items'])} items) and deflecting with food humor.")
-        cooling_reply = (
-            "Array ustaad itna ghussa? 😅 Lagta hai bhook bohat tez lagi hai aur dimagh ki batti gul ho rahi hai!\n\n"
-            "Ghussa thanda karein, ek garam Crispy Zinger 🍔 ya chilled Mint Margarita 🥤 mangwayein, "
-            "tabiyat ek dam fresh ho jayegi! Bataiye kya pack karein? 🤤"
-        )
+        log_warn("ABUSE_SANITIZED", f"Sanitized abusive language from {clean_phone}. Preserving cart ({len(cart['items'])} items).")
+        cooling_reply = get_template("abuse_cooling", current_lang)
         chat_hist.append({"role": "user", "content": msg_body})
         chat_hist.append({"role": "assistant", "content": cooling_reply})
         session["chat_history"] = chat_hist[-20:]
@@ -1131,7 +1307,7 @@ def process_customer_message(
         save_chat_history(clean_phone, restaurant_id, "assistant", cooling_reply)
         return {
             "reply_text": cooling_reply,
-            "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"],
+            "buttons": get_buttons("menu", current_lang),
             "order_state": session.get("order_state", OrderState.BROWSING_MENU),
             "customer_cart": cart,
             "customer_details": details,
@@ -1140,19 +1316,16 @@ def process_customer_message(
         }
     msg_body = cleaned_body
 
-    # 4. Non-Food Off-Topic Fast Interception (Politics, Coding, Math, Homework)
+    # 4. Non-Food Off-Topic Fast Interception (Politics, Coding, Math, Homework, Non-Menu Food like Chinese)
     off_topic_patterns = [
         "who is prime minister", "imran khan", "nawaz sharif", "write python", "write code",
         "solve this math", "do my homework", "who won the match", "write an essay", "write poem",
-        "tell me a joke about politics", "crypto", "bitcoin", "weather forecast"
+        "tell me a joke about politics", "crypto", "bitcoin", "weather forecast",
+        "chinese", "chowmein", "manchurian", "pasta", "sushi", "noodles"
     ]
     if any(p in msg_lower for p in off_topic_patterns):
         log_info("OFF_TOPIC_DEFLECTED", f"Deflected non-food question from {clean_phone}: '{msg_body}'")
-        deflect_reply = (
-            "Ustaad humara dimagh sirf Crispy Burgers, Chicken Biryani aur Loaded Fries mein chalta hai! 🍔🤤\n\n"
-            "Siyasat, coding aur homework chhoro, pehle pait pooja karein! "
-            "Bataiye aaj kya lazeez mangwa rahe hain? 🍟🥤"
-        )
+        deflect_reply = get_template("off_topic", current_lang)
         chat_hist.append({"role": "user", "content": msg_body})
         chat_hist.append({"role": "assistant", "content": deflect_reply})
         session["chat_history"] = chat_hist[-20:]
@@ -1161,7 +1334,7 @@ def process_customer_message(
         save_chat_history(clean_phone, restaurant_id, "assistant", deflect_reply)
         return {
             "reply_text": deflect_reply,
-            "buttons": ["Menu Dekhein 📋", "Crispy Zinger 🍔", "Loaded Fries 🍟"],
+            "buttons": get_buttons("menu", current_lang),
             "order_state": session.get("order_state", OrderState.BROWSING_MENU),
             "customer_cart": cart,
             "customer_details": details,
@@ -1269,17 +1442,25 @@ def process_customer_message(
                     raw_name, raw_variant, suggested_price
                 )
                 if is_valid:
-                    cart = add_item_to_cart(cart, val_name, val_variant, qty, val_price, notes)
-                    log_ok("PRICING_GUARD_OK", f"Added verified {qty}x {val_name} ({val_variant}) @ Rs. {val_price} to cart for {clean_phone}")
+                    cart = add_item_to_cart(cart, val_name, val_variant, qty, val_price, notes, force_update=(action == "update"))
+                    log_ok("PRICING_GUARD_OK", f"Added/Updated verified {qty}x {val_name} ({val_variant}) @ Rs. {val_price} in cart for {clean_phone}")
                 else:
                     log_warn("PRICING_GUARD_REJECT", f"Rejected invalid/hallucinated item '{raw_name}' for {clean_phone}")
 
-        # Apply customer details updates
+        # Apply customer details updates with strict validation
         details_updates = parsed.get("customer_details_updates", {})
         for k in ["customer_name", "delivery_address", "payment_method"]:
             if details_updates.get(k):
-                details[k] = details_updates[k]
-                log_info("CUSTOMER_DETAIL_UPDATED", f"Updated {k}='{details[k]}' for {clean_phone}")
+                val = str(details_updates[k]).strip()
+                if k == "delivery_address" and is_valid_delivery_address(val):
+                    details[k] = val
+                    log_info("CUSTOMER_DETAIL_UPDATED", f"Updated {k}='{details[k]}' for {clean_phone}")
+                elif k == "customer_name" and is_valid_customer_name(val):
+                    details[k] = val
+                    log_info("CUSTOMER_DETAIL_UPDATED", f"Updated {k}='{details[k]}' for {clean_phone}")
+                elif k == "payment_method" and val:
+                    details[k] = val
+                    log_info("CUSTOMER_DETAIL_UPDATED", f"Updated {k}='{details[k]}' for {clean_phone}")
 
     # 8. Rule-based Fallback if AI didn't provide complete answer
     media_url = None
@@ -1295,22 +1476,24 @@ def process_customer_message(
     # 9. Strict Non-Premature Order Confirmation Gatekeeper
     all_details_present = (
         len(cart.get("items", [])) > 0 and
-        len(str(details.get("delivery_address") or "").strip()) >= 5 and
-        len(str(details.get("customer_name") or "").strip()) >= 2 and
+        is_valid_delivery_address(details.get("delivery_address")) and
+        is_valid_customer_name(details.get("customer_name")) and
         bool(str(details.get("payment_method") or "").strip())
     )
 
     is_explicit_confirm = (
-        btn_id in ["btn_confirm", "btn_haan_confirm_karein", "btn_haan,_confirm_karein_"] or
-        any(w in msg_lower for w in ["confirm", "order confirm", "haan confirm", "yes confirm", "haan kardo", "done confirm", "haan, confirm", "final confirm"])
+        btn_id in ["btn_confirm", "btn_haan_confirm_karein", "btn_haan,_confirm_karein_", "btn_yes,_confirm!_✅", "btn_confirm!_✅", "btn_onayla!_✅", "btn_bestätigen!_✅"] or
+        any(w in msg_lower for w in ["confirm", "order confirm", "haan confirm", "yes confirm", "haan kardo", "done confirm", "haan, confirm", "final confirm", "yes, confirm", "yes confirm"])
     )
 
     # If details just got completed but user hasn't explicitly clicked Confirm yet:
     if all_details_present and not is_explicit_confirm:
         next_state = OrderState.COLLECTING_DETAILS
         item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in cart["items"]])
+        header = get_template("order_summary_header", current_lang)
+        prompt_confirm = get_template("order_confirm_prompt", current_lang)
         ai_reply_text = (
-            f"📋 *Order Summary Tayar Hai Ustaad:*\n"
+            f"{header}\n"
             f"{item_lines}\n\n"
             f"Subtotal: Rs. {cart['subtotal']}\n"
             f"Delivery Fee: Rs. {cart['delivery_fee']}\n"
@@ -1318,14 +1501,14 @@ def process_customer_message(
             f"👤 Name: {details['customer_name']}\n"
             f"📍 Address: {details['delivery_address']}\n"
             f"💳 Payment: {details['payment_method']}\n\n"
-            "Ustaad kya main yeh order final kitchen ko bhej du? Confirm karein! 👨‍🍳🔥"
+            f"{prompt_confirm}"
         )
-        ai_buttons = ["Haan, Confirm Karein ✅", "Change Order ✏️"]
+        ai_buttons = get_buttons("confirm", current_lang)
         media_url = None
         log_info("ORDER_SUMMARY_PRESENTED", f"Presented complete order summary to {clean_phone}, awaiting explicit confirmation")
 
     elif next_state == OrderState.ORDER_CONFIRMED or is_explicit_confirm:
-        can_confirm, missing_msg, missing_btns = can_confirm_order(cart, details)
+        can_confirm, missing_msg, missing_btns = can_confirm_order(cart, details, lang=current_lang)
         if not can_confirm or not is_explicit_confirm:
             # Overrule premature confirmation!
             log_warn("CONFIRMATION_BLOCKED", f"Blocked premature confirmation for {clean_phone}: {missing_msg or 'Needs explicit confirmation'}")
@@ -1337,28 +1520,38 @@ def process_customer_message(
         else:
             next_state = OrderState.ORDER_CONFIRMED
             media_url = SPEED_OK_GIF_URL
-            if not session.get("active_order_id"):
-                order_id = f"ORD-{int(time.time())}"
-                session["active_order_id"] = order_id
-                session["order_status"] = "PREPARING"
-                order_data = {
-                    "order_id": order_id,
-                    "cart": cart,
-                    "customer": details,
-                    "status": "PREPARING",
-                    "timestamp": time.time()
-                }
-                save_order(restaurant_id, clean_phone, order_data)
-                ai_reply_text = (
-                    f"🎉 *ORDER CONFIRMED! BHOOM!* 🚀🍔\n\n"
-                    f"Order ID: *{order_id}*\n"
-                    f"Status: *Kitchen mein aag lag chuki hai aur burger grill ho raha hai!* 🔥👨‍🍳\n"
-                    f"Estimated Delivery: *30-40 Minutes* 🛵\n\n"
-                    f"Bawarchi Bhai kehta hai: *Speed se delivery pohnche gi ustaad!* 😎\n"
-                    f"*{RESTAURANT_NAME}* ka intekhab karne ka shukriya! Rider nikalte hi aap ko WhatsApp par live update mil jayegi."
-                )
-                ai_buttons = ["Track Order 🛵", "Naya Order 🍔"]
-                log_ok("ORDER_CONFIRMED_FINAL", f"🎉 ORDER CONFIRMED! ID={order_id}, Phone={clean_phone}, Total=Rs. {cart['grand_total']}, Attached Speed GIF")
+            order_id = session.get("active_order_id") or f"ORD-{int(time.time())}"
+            session["active_order_id"] = order_id
+            session["order_status"] = "PREPARING"
+            order_data = {
+                "order_id": order_id,
+                "cart": copy.deepcopy(cart),
+                "customer": copy.deepcopy(details),
+                "status": "PREPARING",
+                "timestamp": time.time()
+            }
+            save_order(restaurant_id, clean_phone, order_data)
+            session["last_confirmed_order"] = order_data
+            
+            ai_reply_text = get_template(
+                "order_confirmed",
+                current_lang,
+                order_id=order_id,
+                restaurant_name=RESTAURANT_NAME
+            )
+            ai_buttons = get_buttons("tracking", current_lang)
+            log_ok("ORDER_CONFIRMED_FINAL", f"🎉 ORDER CONFIRMED! ID={order_id}, Phone={clean_phone}, Total=Rs. {cart['grand_total']}, Attached Speed GIF")
+
+    # STRICT SAFETY OVERRIDE: NEVER ALLOW BUTTONS FOR FREE TEXT INPUT (Address or Name)
+    if next_state == OrderState.COLLECTING_DETAILS:
+        if not is_valid_delivery_address(details.get("delivery_address")):
+            ai_buttons = []
+            if not is_valid_delivery_address(msg_body) and any(w in ai_reply_text.lower() for w in ["continue", "shukriya", "thank", "naam", "name"]):
+                ai_reply_text = get_template("address_invalid", current_lang)
+        elif not is_valid_customer_name(details.get("customer_name")):
+            ai_buttons = []
+            if not is_valid_customer_name(msg_body) and any(w in ai_reply_text.lower() for w in ["continue", "payment", "cash", "online", "tarika"]):
+                ai_reply_text = get_template("name_invalid", current_lang)
 
     # 10. Intelligent 4K Realistic Food Image Engine
     # Only if not already set (e.g., Speed OK GIF for ORDER_CONFIRMED)
