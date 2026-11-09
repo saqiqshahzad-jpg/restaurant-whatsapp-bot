@@ -1409,11 +1409,19 @@ def process_whatsapp_data(data: dict):
         contacts = value.get("contacts") or []
         default_sender = contacts[0].get("wa_id", "") if contacts else ""
 
-        # Status updates (delivered, read, sent) - ignore without error
+        # Status updates (delivered, read, sent, failed)
         statuses = value.get("statuses") or []
         if statuses:
             for s in statuses:
-                log_info("WA_STATUS_UPDATE", f"Status for {s.get('recipient_id')}: {s.get('status')}")
+                st = s.get("status", "unknown")
+                recip = s.get("recipient_id", "unknown")
+                errs = s.get("errors")
+                if st == "failed" or errs:
+                    log_error("WA_STATUS_FAILED", f"WhatsApp delivery to {recip} FAILED: status={st}, errors={errs}")
+                elif st in ("delivered", "sent", "read"):
+                    log_ok("WA_STATUS_OK", f"WhatsApp delivery to {recip} -> {st.upper()}")
+                else:
+                    log_info("WA_STATUS_UPDATE", f"Status for {recip}: {st}")
             return
 
         messages = value.get("messages") or []
