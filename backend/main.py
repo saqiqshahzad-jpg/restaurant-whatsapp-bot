@@ -1547,7 +1547,7 @@ def meta_status_endpoint():
 
     info = {
         "phone_number_id_configured": bool(phone_id),
-        "phone_number_id_preview": f"{phone_id[:4]}***{phone_id[-4:]}" if len(phone_id) >= 8 else phone_id,
+        "phone_number_id": phone_id,
         "access_token_configured": bool(wa_token),
         "access_token_preview": f"{wa_token[:8]}***{wa_token[-6:]}" if len(wa_token) >= 14 else "missing",
         "verify_tokens_accepted": [t for t in [verify_token, os.getenv("WHATSAPP_VERIFY_TOKEN"), "zaiqa_bot_secret_2026", "restaurant_bot_secret", "ALAAUDIN_SECRET_TOKEN"] if t],
@@ -1573,6 +1573,48 @@ def meta_status_endpoint():
             info["error_details"] = str(e)
 
     return JSONResponse(content=info)
+
+@app.get('/meta/send-test')
+def meta_send_test_endpoint(to: str):
+    """
+    Diagnostic tool: Attempt to send a WhatsApp message to a specific number
+    and return the exact error/success response from Meta Graph API.
+    """
+    clean_to = re.sub(r'[^0-9]', '', to)
+    wa_token = os.getenv("WHATSAPP_ACCESS_TOKEN", "")
+    phone_id = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
+
+    if not wa_token or not phone_id:
+        return JSONResponse(status_code=400, content={"error": "WHATSAPP_ACCESS_TOKEN or WHATSAPP_PHONE_NUMBER_ID missing on server"})
+
+    url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{phone_id}/messages"
+    headers = {"Authorization": f"Bearer {wa_token}", "Content-Type": "application/json"}
+
+    # Attempt: Template message (hello_world) - required for sandbox opt-in
+    template_payload = {
+        "messaging_product": "whatsapp",
+        "to": clean_to,
+        "type": "template",
+        "template": {
+            "name": "hello_world",
+            "language": {"code": "en_US"}
+        }
+    }
+
+    try:
+        res = requests.post(url, headers=headers, json=template_payload, timeout=10)
+        res_data = res.json()
+        log_wa("META_TEST_SEND", f"Sent test template to {clean_to} -> HTTP {res.status_code}: {res.text[:150]}")
+        return JSONResponse(status_code=res.status_code, content={
+            "http_status": res.status_code,
+            "target_phone": clean_to,
+            "phone_number_id": phone_id,
+            "meta_response": res_data,
+            "action_taken": "Sent 'hello_world' template message to initiate 24h customer window"
+        })
+    except Exception as e:
+        log_error("META_TEST_SEND_ERR", f"Failed to send test template to {clean_to}: {e}", exc=e)
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get('/webhook')
 def verify_webhook(request: Request):
