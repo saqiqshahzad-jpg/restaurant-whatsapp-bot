@@ -540,7 +540,7 @@ def send_whatsapp_image(restaurant_id: str, phone: str, image_url: str, caption:
         "type": "image",
         "image": {
             "link": image_url,
-            "caption": caption
+            "caption": (caption or "")[:1024]
         }
     }
     try:
@@ -1359,6 +1359,45 @@ def process_customer_message(
                 )
                 ai_buttons = ["Track Order 🛵", "Naya Order 🍔"]
                 log_ok("ORDER_CONFIRMED_FINAL", f"🎉 ORDER CONFIRMED! ID={order_id}, Phone={clean_phone}, Total=Rs. {cart['grand_total']}, Attached Speed GIF")
+
+    # 10. Intelligent 4K Realistic Food Image Engine
+    # Only if not already set (e.g., Speed OK GIF for ORDER_CONFIRMED)
+    if not media_url and next_state != OrderState.ORDER_CONFIRMED:
+        shown_images = session.setdefault("shown_images", [])
+        is_explicit = menu_manager.is_explicit_image_request(msg_body)
+
+        # A) Explicit Image Request: User specifically asked to see photo/pic/dikhao
+        if is_explicit:
+            # 1. Match item in user message
+            target_item = menu_manager.find_item_for_query(msg_body)
+            # 2. Or match item currently in cart / discussed
+            if not target_item and cart.get("items"):
+                target_item = menu_manager.find_item_for_query(cart["items"][-1]["name"])
+            # 3. Fallback to bestseller
+            if not target_item:
+                target_item = menu_manager.find_item_for_query("crispy_zinger")
+
+            if target_item and target_item.get("image") and target_item["image"].startswith("http"):
+                media_url = target_item["image"]
+                item_name = target_item["name"]
+                log_ok("IMAGE_EXPLICIT_DISPATCH", f"Dispatched requested 4K image for '{item_name}' to {clean_phone}")
+                if not any(w in ai_reply_text.lower() for w in ["tasveer", "photo", "image", "dekhein"]):
+                    ai_reply_text = f"Yeh dekhein ustaad! Hamara garma garam *{item_name}* 🤤🔥\n\n" + ai_reply_text
+
+        # B) Proactive Image Dispatch: User shows interest or adds item, send ONCE
+        else:
+            interested_item = menu_manager.detect_customer_item_interest(msg_body)
+            if not interested_item and items_to_update:
+                interested_item = menu_manager.find_item_for_query(items_to_update[0].get("name", ""))
+
+            if interested_item:
+                item_id = interested_item.get("id")
+                # Frequency capping guard: only send proactively ONCE per item
+                if item_id and item_id not in shown_images:
+                    if interested_item.get("image") and interested_item["image"].startswith("http"):
+                        media_url = interested_item["image"]
+                        shown_images.append(item_id)
+                        log_ok("IMAGE_PROACTIVE_DISPATCH", f"Proactively dispatched 4K image for '{interested_item['name']}' to {clean_phone} (First time interest)")
 
     # State transition & Update session
     session["order_state"] = next_state

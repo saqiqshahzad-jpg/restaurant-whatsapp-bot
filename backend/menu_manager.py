@@ -22,7 +22,7 @@ DEFAULT_MENU_FALLBACK = {
             "name": "Crispy Zinger Burger",
             "category": "Burgers",
             "tag": "Bestseller 🔥",
-            "image": "/images/zinger.jpg",
+            "image": "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=80",
             "description": "Crispy fried golden chicken fillet oozing with cheese lava sauce in a toasted brioche bun",
             "base_price": 550,
             "variants": {"Regular": 550, "Cheese Lava": 650},
@@ -34,7 +34,7 @@ DEFAULT_MENU_FALLBACK = {
             "name": "Special Chicken Biryani",
             "category": "Rice & Biryani",
             "tag": "Chef Special 👑",
-            "image": "/images/biryani.jpg",
+            "image": "https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=800&auto=format&fit=crop&q=80",
             "description": "Royal aromatic long-grain basmati rice cooked in clay handi with tender spiced chicken",
             "base_price": 400,
             "variants": {
@@ -53,7 +53,7 @@ DEFAULT_MENU_FALLBACK = {
             "name": "Loaded Fries",
             "category": "Sides & Fries",
             "tag": "Crispy & Cheesy 🧀",
-            "image": "/images/fries.jpg",
+            "image": "https://images.unsplash.com/photo-1585109649139-366815a0d713?w=800&auto=format&fit=crop&q=80",
             "description": "Golden potato fries loaded with signature sauces and seasonings",
             "base_price": 450,
             "variants": {"Mayo Garlic": 450, "Jalapeno Cheese": 450},
@@ -65,7 +65,7 @@ DEFAULT_MENU_FALLBACK = {
             "name": "Mint Margarita",
             "category": "Beverages",
             "tag": "Refreshing ❄️",
-            "image": "/images/margarita.jpg",
+            "image": "https://images.unsplash.com/photo-1517244683847-7456b63c5969?w=800&auto=format&fit=crop&q=80",
             "description": "Chilled electric mint cooler with fresh crushed garden mint leaves and lime wheel garnish",
             "base_price": 150,
             "variants": {"Regular": 150},
@@ -77,7 +77,7 @@ DEFAULT_MENU_FALLBACK = {
             "name": "Cold Drink",
             "category": "Beverages",
             "tag": "Chilled 🥤",
-            "image": "/images/margarita.jpg",
+            "image": "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=800&auto=format&fit=crop&q=80",
             "description": "Ice-cold carbonated beverage (Coke, Sprite, Fanta)",
             "base_price": 150,
             "variants": {"Regular": 150, "Coke": 150, "Sprite": 150, "Fanta": 150},
@@ -573,6 +573,84 @@ class MenuManager:
             })
 
         return extracted
+
+    # -------------------------------------------------------------------------
+    # Intelligent Food Image Matching & Interest Detection Engine
+    # -------------------------------------------------------------------------
+    def is_explicit_image_request(self, text: str) -> bool:
+        """
+        Detects if customer is explicitly asking to see a picture/image/photo/look of an item.
+        Handles English, Roman Urdu, and colloquial terms.
+        """
+        t = text.lower().strip()
+        triggers = [
+            "image", "photo", "pic", "picture", "tasveer", "tasweer", "tasvir", "aks",
+            "dikhao", "dikhana", "dikhayein", "dikhado", "dikha do", "dikhao zara",
+            "show", "show me", "look like", "kaisa dikhta", "kaisa hai", "kaisa lagta",
+            "photo bhejo", "pic bhejo", "tasveer bhejo", "image bhejo", "send photo",
+            "send pic", "send image", "dekhna hai", "dekhna", "dekhne do", "photo send",
+            "tasveer dikhana", "pic send karo", "photo dikhao"
+        ]
+        return any(trig in t for trig in triggers)
+
+    def find_item_for_query(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Intelligently matches a customer phrase or item name to the official menu item.
+        Checks exact ID, exact name, keywords, and substring matches.
+        """
+        self._reload_if_needed()
+        q_clean = query.lower().strip()
+        if not q_clean:
+            return None
+
+        # 1. Exact item id match
+        if q_clean in self._items_by_id:
+            return self._items_by_id[q_clean]
+
+        # 2. Check full name match
+        for item in self._items_by_id.values():
+            name_lower = item["name"].lower()
+            if q_clean == name_lower or name_lower in q_clean or q_clean in name_lower:
+                return item
+
+        # 3. Check keywords list
+        for item in self._items_by_id.values():
+            for kw in item.get("keywords", []):
+                kw_lower = kw.lower()
+                # Check whole word or significant substring match
+                pattern = r"\b" + re.escape(kw_lower) + r"\b"
+                if re.search(pattern, q_clean) or kw_lower in q_clean:
+                    return item
+
+        # 4. Check category match (e.g. "burger", "biryani", "pizza", "fries")
+        for item in self._items_by_id.values():
+            cat_lower = item.get("category", "").lower()
+            if cat_lower in q_clean:
+                return item
+
+        return None
+
+    def get_item_image(self, item_name_or_id: str) -> Optional[str]:
+        """
+        Returns the verified crystal-clear 4K CDN image URL for any item ID or name.
+        """
+        item = self.find_item_for_query(item_name_or_id)
+        if item and item.get("image") and item["image"].startswith("http"):
+            return item["image"]
+        return None
+
+    def detect_customer_item_interest(self, text: str) -> Optional[Dict[str, Any]]:
+        """
+        Detects if customer is interested in, asking about, or ordering a specific item.
+        Returns the matched item if interest is detected.
+        """
+        # First check if ordered items were parsed
+        parsed = self.parse_items_from_text(text)
+        if parsed:
+            return self.find_item_for_query(parsed[0]["name"])
+
+        # Otherwise check general query matching
+        return self.find_item_for_query(text)
 
     # -------------------------------------------------------------------------
     # Dynamic System Prompt Generator
