@@ -823,9 +823,17 @@ NEVER switch back to Roman Urdu, English, or any other language unless the custo
      * Output confirmation buttons.
    - Step 6: ONLY when user explicitly confirms, transition to ORDER_CONFIRMED.
 
+### MICRO-THINKING PROTOCOL (THINK BEFORE ANSWERING - ZERO ERROR GUARANTEE):
+Before writing your response, perform a 1-sentence mental check inside the "thought" field:
+- Verify: Is the reply 100% in {target_lang_name}?
+- Verify: If customer chose a variant/spice level, did I use action='update' to avoid duplicate items?
+- Verify: Are items and prices strictly from our menu?
+- Verify: If asking for Address or Name, did I keep buttons strictly empty []?
+
 ### JSON OUTPUT FORMAT:
 Respond strictly with a valid JSON object adhering to this schema:
 {{
+  "thought": "1-sentence micro check: verify language lock, anti-duplicate variant check, and exact menu price",
   "reply_text": "Your message to the customer in {target_lang_name}",
   "buttons": ["Button 1", "Button 2"],
   "order_state": "BROWSING_MENU" | "BUILDING_CART" | "COLLECTING_DETAILS" | "ORDER_CONFIRMED",

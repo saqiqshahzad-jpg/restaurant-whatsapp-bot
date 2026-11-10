@@ -461,14 +461,16 @@ def get_buttons(key: str, lang: Optional[str] = "Roman_Urdu") -> List[str]:
     return list(btns)[:3]
 
 
-# Markers for language detection
+# Markers for language detection (strictly grammatical and structural Roman Urdu words)
 ROMAN_URDU_MARKERS = {
     "kya", "hai", "hain", "chahiye", "karo", "kardo", "bhai", "bhejo", "mujhe", "aap",
-    "janaab", "janab", "shukriya", "theek", "thik", "acha", "achha", "bohot", "nahi", "ka",
+    "janaab", "janab", "shukriya", "theek", "thik", "acha", "achha", "bohot", "bohat", "nahi", "ka",
     "ki", "ke", "ko", "se", "mein", "par", "hoga", "karna", "krdo", "mangwa", "lekin",
-    "aur", "pe", "yar", "yaar", "jani", "bhejna", "wahi", "wala", "wali", "biryani",
-    "khana", "khush", "amdeed", "batao", "batayein", "dein", "do", "lena", "dena", "shuru",
-    "haan", "ho", "gaya", "krna", "chah", "raha", "karwado", "pack", "kar", "rakho"
+    "aur", "pe", "yar", "yaar", "jani", "bhejna", "wahi", "wala", "wali", "wale",
+    "khana", "khush", "amdeed", "batao", "batayein", "dein", "dedo", "lena", "dena", "shuru",
+    "haan", "ho", "gaya", "krna", "chah", "raha", "karwado", "pack", "kar", "rakho",
+    "ustaad", "kitna", "kitne", "humein", "hum", "tum", "mera", "meri", "mere", "kab", "kidhar",
+    "kripya", "pait", "pooja", "sunayein", "sunao", "chunaav", "shamil", "bataein"
 }
 
 ENGLISH_MARKERS = {
@@ -477,6 +479,49 @@ ENGLISH_MARKERS = {
     "thanks", "thank", "you", "good", "where", "when", "send", "give", "me", "the",
     "is", "are", "with", "have", "need", "show", "menu", "bring", "serve", "take"
 }
+
+
+def check_explicit_language_switch_request(text: str) -> Optional[str]:
+    """
+    Checks if the user explicitly demands switching to a language.
+    Requires clear intent:
+    - Verbs like 'speak/talk/chat/switch to/write/converse/bolo/likho' + language
+    - Prepositional/adverbial phrases like 'in english', 'en español', 'urdu mein', 'english me'
+    - Or message consists strictly of the language name itself (e.g. 'english', 'english please', 'roman urdu')
+    Does NOT falsely trigger on food queries like 'chinese food', 'have chinese', etc.
+    """
+    clean = text.strip().lower()
+    if not clean:
+        return None
+
+    # Exclude food / menu / item inquiries from being misidentified as language requests
+    if any(w in clean for w in ["food", "dish", "khana", "have", "available", "deal", "burger", "biryani", "rice", "noodle"]):
+        if not any(w in clean for w in ["speak", "talk", "chat", "language", "switch", "bolo", "likho", "zubaan", "zaban"]):
+            return None
+
+    LANG_PATTERNS = [
+        ("English", r'^(english|angrezi)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me|bolo|likho|can you speak)\s+(in\s+)?(english|angrezi)\b|\b(english|angrezi)\s+(please|plz|mein|me|bolo|likho)\b'),
+        ("Roman_Urdu", r'^(roman urdu|urdu)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me|bolo|likho)\s+(in\s+)?(roman urdu|urdu)\b|\b(roman urdu|urdu)\s+(mein|me|bolo|likho)\b'),
+        ("Urdu_Script", r'^(اردو|اردو رسم الخط)$|\b(اردو میں|اردو بولو|اردو لکھو)\b'),
+        ("Arabic", r'^(arabic|عربي|العربية)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me)\s+(in\s+)?arabic\b|\b(بالعربي|تكلم عربي)\b'),
+        ("Hindi", r'^(hindi|हिन्दी|हिंदी)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me|bolo)\s+(in\s+)?hindi\b|\b(हिंदी में|हिन्दी में|हिंदी बोलो)\b'),
+        ("Spanish", r'^(spanish|español|espanol)\s*(please|plz|por favor)?$|\b(speak|talk|chat|switch to|en|habla|hablar)\s+(in\s+)?(spanish|español|espanol)\b'),
+        ("French", r'^(french|français|francais)\s*(please|plz|svp)?$|\b(speak|talk|chat|switch to|en|parlez|parle)\s+(in\s+)?(french|français|francais)\b'),
+        ("German", r'^(german|deutsch)\s*(please|plz|bitte)?$|\b(speak|talk|chat|switch to|auf|sprechen sie)\s+(in\s+)?(german|deutsch)\b'),
+        ("Turkish", r'^(turkish|türkçe|turkce)\s*(please|plz|lütfen)?$|\b(speak|talk|chat|switch to|türkçe konus|turkce konus)\b'),
+        ("Russian", r'^(russian|русский)\s*(please|plz|пожалуйста)?$|\b(speak|talk|chat|switch to|по-русски|говорите по-русски)\b'),
+        ("Chinese", r'^(chinese|中文|普通话)\s*(please|plz)?$|\b(speak|talk|chat|switch to|说中文|讲中文)\b'),
+        ("Italian", r'^(italian|italiano)\s*(please|plz|per favore)?$|\b(speak|talk|chat|switch to|parla italiano)\b'),
+        ("Portuguese", r'^(portuguese|português|portugues)\s*(please|plz|por favor)?$|\b(speak|talk|chat|switch to|fale português|falar portugues)\b'),
+        ("Bengali", r'^(bengali|bangla|বাংলা)\s*(please|plz)?$|\b(speak|talk|chat|switch to|বাংলায় বলুন|বাংলায়)\b'),
+        ("Indonesian", r'^(indonesian|bahasa indonesia)\s*(please|plz)?$|\b(speak|talk|chat|switch to|bicara bahasa indonesia)\b'),
+    ]
+
+    for lang_name, pattern in LANG_PATTERNS:
+        if re.search(pattern, clean):
+            return lang_name
+
+    return None
 
 
 def detect_foreign_language(text: str, current_lang: str = "Roman Urdu") -> Optional[str]:
@@ -582,6 +627,10 @@ def detect_foreign_language(text: str, current_lang: str = "Roman Urdu") -> Opti
             return "Indonesian"
         return None
 
+    # Strict Roman Urdu Immunity: If user uses ANY Roman Urdu words, do NOT classify as foreign
+    if len(ru_matches) > 0:
+        return None
+
     # Check English vs Roman Urdu
     if norm_current == "Roman_Urdu":
         if len(en_matches) >= 2 and len(ru_matches) == 0:
@@ -590,7 +639,7 @@ def detect_foreign_language(text: str, current_lang: str = "Roman Urdu") -> Opti
             "hello", "hi there", "can i order", "i want to order", "what is on the menu",
             "show me the menu", "how much is", "can you deliver", "what are your deals"
         ]):
-            if len(ru_matches) <= 1:
+            if len(ru_matches) == 0:
                 return "English"
     elif norm_current == "English":
         if len(ru_matches) >= 2 and len(en_matches) <= 1:

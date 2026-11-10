@@ -53,6 +53,7 @@ try:
         detect_foreign_language,
         build_language_switch_offer,
         is_smart_language_confirmation,
+        check_explicit_language_switch_request,
         LANGUAGES_CONFIG,
         normalize_lang,
         get_template,
@@ -63,13 +64,15 @@ except ImportError:
         detect_foreign_language,
         build_language_switch_offer,
         is_smart_language_confirmation,
+        check_explicit_language_switch_request,
         LANGUAGES_CONFIG,
         normalize_lang,
         get_template,
         get_buttons
     )
 
-SPEED_OK_GIF_URL = "https://media.giphy.com/media/tsX3YMWYzDPjAARfeg/giphy.gif"
+CELEBRATION_IMAGE_URL = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=800&auto=format&fit=crop&q=80"
+SPEED_OK_GIF_URL = CELEBRATION_IMAGE_URL
 
 # Load environment variables from .env file
 load_dotenv()
@@ -563,6 +566,149 @@ def save_order(restaurant_id: str, phone: str, order_data: dict) -> dict:
                 log_warn("ORDER_SUPABASE_ERR", f"Supabase save order attempt failed: {e}")
 
     return order_data
+
+def get_latest_order(phone: str, restaurant_id: str = "default_restaurant") -> Optional[dict]:
+    """
+    Recovers the latest confirmed order for the given customer phone number.
+    Checks:
+    1. Local orders cache (orders_cache.json)
+    2. Supabase orders table (phone=eq.{clean_phone} order by created_at.desc)
+    Ensures order tracking and active order context survive Render free tier spin-downs!
+    """
+    clean_phone = phone.strip()
+
+    # 1. Search local orders cache
+    try:
+        all_orders = _read_local_json(LOCAL_ORDERS_PATH, [])
+        if isinstance(all_orders, list):
+            for od in reversed(all_orders):
+                p = od.get("phone") or od.get("phone_number") or od.get("customer", {}).get("contact_phone")
+                if p and p.strip() == clean_phone:
+                    return od
+    except Exception as e:
+        log_warn("ORDER_CACHE_SEARCH_ERR", f"Local order cache read failed for {clean_phone}: {e}")
+
+    # 2. Search Supabase orders table
+    if SUPABASE_URL and SUPABASE_KEY:
+        for field in ["phone", "phone_number"]:
+            try:
+                url = f"{SUPABASE_URL}/rest/v1/{TABLE_ORDERS}?{field}=eq.{clean_phone}&order=created_at.desc&limit=1"
+                res = requests.get(url, headers=get_supabase_headers(), timeout=4)
+                if res.status_code == 200 and res.json():
+                    row = res.json()[0]
+                    saved_od = row.get("order_data")
+                    if isinstance(saved_od, dict) and "cart" in saved_od:
+                        return saved_od
+                    od = {
+                        "order_id": row.get("order_id") or f"ORD-{int(time.time())}",
+                        "cart": row.get("cart") or calculate_cart_totals({}),
+                        "customer": row.get("customer") or {"contact_phone": clean_phone},
+                        "status": row.get("status", "PREPARING"),
+                        "timestamp": time.time(),
+                        "created_at": row.get("created_at")
+                    }
+                    return od
+            except Exception as e:
+                log_warn("ORDER_SUPABASE_FETCH_ERR", f"Supabase order search failed for {clean_phone}: {e}")
+
+    return None
+
+def format_live_order_tracking(order_data: dict, lang: str = "Roman_Urdu") -> Tuple[str, list]:
+    """
+    Constructs an interactive, dynamic, realistic live order tracking screen.
+    Computes elapsed minutes, visual progress bar, realistic stage, remaining ETA,
+    and complete itemized breakdown in the customer's active language.
+    """
+    order_id = order_data.get("order_id", "ORD-LIVE")
+    cart = order_data.get("cart", {})
+    customer = order_data.get("customer", {})
+    ts = order_data.get("timestamp")
+    if not ts:
+        ts = time.time()
+    elapsed_mins = max(0, int((time.time() - ts) / 60))
+
+    canon_lang = normalize_lang(lang)
+
+    # 4-Stage Dynamic Progress
+    if elapsed_mins <= 5:
+        progress_bar = "▓▓▓░░░░░░░░░ 25%"
+        remaining_eta = f"{max(25, 40 - elapsed_mins)} Mins"
+        if canon_lang == "English":
+            stage_title = "🔥 *Stage 1: Cooking & Grilling!*"
+            stage_desc = "The grill is sizzling! Chef is preparing your delicious meal fresh."
+        else:
+            stage_title = "🔥 *Stage 1: Kitchen mein aag lagi hai!*"
+            stage_desc = "Chef taaza khana grill kar raha hai! Khushboo phail chuki hai."
+    elif elapsed_mins <= 15:
+        progress_bar = "▓▓▓▓▓▓░░░░░░ 50%"
+        remaining_eta = f"{max(15, 30 - elapsed_mins)} Mins"
+        if canon_lang == "English":
+            stage_title = "👨‍🍳 *Stage 2: Packaging & Quality Check!*"
+            stage_desc = "Meal cooked to perfection! Hot foil packaging and boxing in progress."
+        else:
+            stage_title = "👨‍🍳 *Stage 2: Packaging & Quality Check!*"
+            stage_desc = "Garma garam khana foil pack ho raha hai! Chef ki final inspection jari hai."
+    elif elapsed_mins <= 30:
+        progress_bar = "▓▓▓▓▓▓▓▓▓░░░ 75%"
+        remaining_eta = f"{max(5, 35 - elapsed_mins)} Mins"
+        if canon_lang == "English":
+            stage_title = "🛵 *Stage 3: Rider On The Way!*"
+            stage_desc = "Rider picked up your order and is speeding to your location!"
+        else:
+            stage_title = "🛵 *Stage 3: Rider Nikal Chuka Hai!*"
+            stage_desc = "Bawarchi express rider speed se aapki taraf rawana hai!"
+    else:
+        progress_bar = "▓▓▓▓▓▓▓▓▓▓▓▓ 100%"
+        remaining_eta = "Arrived / Calling 🔔"
+        if canon_lang == "English":
+            stage_title = "📍 *Stage 4: Arrived at Destination!*"
+            stage_desc = "Rider has arrived at your address or is ringing your bell!"
+        else:
+            stage_title = "📍 *Stage 4: Rider Darwazay Par Hai!*"
+            stage_desc = "Rider aapke gate / gali mein pohnch chuka hai! Doorbell check karein."
+
+    items = cart.get("items", [])
+    item_lines = "\n".join([f"• {it.get('qty', 1)}x {it.get('name', 'Item')} ({it.get('variant', 'Regular')}) - Rs. {it.get('line_total', it.get('unit_price', 0))}" for it in items])
+    if not item_lines:
+        item_lines = "• Lazeez Food Order"
+
+    addr = customer.get("delivery_address") or "Customer Address"
+    name = customer.get("customer_name") or "Chief"
+    pm = customer.get("payment_method") or "Cash on Delivery"
+    grand_total = cart.get("grand_total", 0)
+
+    if canon_lang == "English":
+        text = (
+            f"🛵 *LIVE ORDER TRACKER* 📍\n\n"
+            f"Order ID: *{order_id}*\n"
+            f"Progress: [{progress_bar}]\n"
+            f"Status: {stage_title}\n"
+            f"Details: {stage_desc}\n"
+            f"Estimated Arrival: *{remaining_eta}*\n\n"
+            f"📋 *Order Items:*\n{item_lines}\n"
+            f"💰 Grand Total: *Rs. {grand_total}*\n"
+            f"📍 Delivery Address: *{addr}*\n"
+            f"👤 Recipient: *{name}* ({pm})\n\n"
+            f"Tap *'Track Order 🛵'* anytime to refresh live status!"
+        )
+        buttons = ["Track Order 🛵", "New Order 🍔"]
+    else:
+        text = (
+            f"🛵 *LIVE ORDER TRACKER* 📍\n\n"
+            f"Order ID: *{order_id}*\n"
+            f"Progress: [{progress_bar}]\n"
+            f"Status: {stage_title}\n"
+            f"Details: {stage_desc}\n"
+            f"Remaining Time: *{remaining_eta}*\n\n"
+            f"📋 *Aapke Items:*\n{item_lines}\n"
+            f"💰 Grand Total: *Rs. {grand_total}*\n"
+            f"📍 Delivery Address: *{addr}*\n"
+            f"👤 Naam: *{name}* ({pm})\n\n"
+            f"Kisi bhi waqt live status dekhne ke liye *'Track Order 🛵'* dabayein!"
+        )
+        buttons = ["Track Order 🛵", "Naya Order 🍔"]
+
+    return text, buttons
 
 def save_chat_history(phone: str, restaurant_id: str, role: str, content: str):
     """Save conversation message to chat history table and local cache."""
@@ -1130,7 +1276,7 @@ def rule_based_order_taker(session: dict, msg: str, btn_id: str = None) -> dict:
             "buttons": ["Track Order 🛵", "Naya Order 🍔"],
             "order_state": OrderState.ORDER_CONFIRMED,
             "cart": cart,
-            "media_url": SPEED_OK_GIF_URL
+            "media_url": CELEBRATION_IMAGE_URL
         }
 
     # General Greeting / Default Inquiry (Personalized for returning customers!)
@@ -1190,14 +1336,42 @@ def process_customer_message(
             "media_url": None
         }
 
-    # Fetch active session
+    # Fetch active session and guarantee order recovery across server spin-downs
     session = get_restaurant_session(clean_phone, restaurant_id)
     current_lang = session.get("current_language", "Roman Urdu")
     pending_lang = session.get("pending_language", None)
     chat_hist = session.get("chat_history", [])
     cart = calculate_cart_totals(session.get("customer_cart", {}))
     details = session.get("customer_details", {})
-    last_confirmed_order = session.get("last_confirmed_order")
+    last_confirmed_order = session.get("last_confirmed_order") or get_latest_order(clean_phone, restaurant_id)
+    if last_confirmed_order and not session.get("last_confirmed_order"):
+        session["last_confirmed_order"] = last_confirmed_order
+
+    # 0. Immediate Explicit Language Switch Request (0 tokens, 0ms, zero 'Press 1' friction!)
+    explicit_lang = check_explicit_language_switch_request(msg_body)
+    if explicit_lang:
+        norm_lang = normalize_lang(explicit_lang)
+        session["current_language"] = norm_lang
+        session["pending_language"] = None
+        session["consecutive_foreign_msgs"] = 0
+        welcome_text = get_template("locked_welcome", norm_lang)
+        menu_buttons = get_buttons("menu", norm_lang)
+        log_ok("EXPLICIT_LANG_SWITCH", f"Customer {clean_phone} explicitly switched language to '{norm_lang}'")
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": welcome_text})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+        save_chat_history(clean_phone, restaurant_id, "assistant", welcome_text)
+        return {
+            "reply_text": welcome_text,
+            "buttons": menu_buttons,
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
+            "customer_details": details,
+            "media_url": None,
+            "current_language": norm_lang
+        }
 
     # 0A. Explicit New Order Trigger (Reset cart for a fresh order while preserving history)
     is_new_order_trigger = (
@@ -1231,28 +1405,41 @@ def process_customer_message(
             "current_language": current_lang
         }
 
-    # 0B. Live Order Tracking / Confirmed Cart Inspection Trigger
+    # 0B. Live Order Tracking Trigger
     is_track_query = (
-        btn_id in ["btn_track_order_🛵", "btn_track_order", "btn_track", "btn_suivre_commande_🛵", "btn_lacak_pesanan_🛵"] or
-        any(w in msg_lower for w in ["track", "status", "kahan", "kitna time", "where is my order", "order status", "mera order", "kya mangwaya", "cart dikhao", "receipt"])
+        btn_id in ["btn_track_order_🛵", "btn_track_order", "btn_track", "btn_suivre_commande_🛵", "btn_lacak_pesanan_🛵", "btn_status"] or
+        any(w in msg_lower for w in ["track", "status", "kahan", "kitna time", "where is my order", "order status", "mera order", "receipt", "order kahan", "rider kahan"])
     )
-    if (session.get("order_state") == OrderState.ORDER_CONFIRMED or is_track_query) and last_confirmed_order and not any(w in msg_lower for w in ["menu", "zinger", "biryani", "pizza", "burger", "fries"]):
-        log_info("TRACK_ORDER_SERVED", f"Served live order tracking to {clean_phone}")
-        ord_cart = last_confirmed_order.get("cart") or cart
-        ord_items = ord_cart.get("items", [])
-        item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in ord_items])
-        
-        reply = get_template(
-            "order_status",
-            current_lang,
-            order_id=last_confirmed_order.get("order_id", session.get("active_order_id", "ORD-LIVE")),
-            status=last_confirmed_order.get("status", "PREPARING"),
-            item_lines=item_lines,
-            grand_total=ord_cart.get("grand_total", 0),
-            address=last_confirmed_order.get("customer", {}).get("delivery_address", details.get("delivery_address", "Confirmed Address"))
-        )
-        buttons = get_buttons("tracking", current_lang)
-        
+    if is_track_query and not any(w in msg_lower for w in ["menu", "zinger", "biryani", "pizza", "burger", "fries"]):
+        if last_confirmed_order:
+            log_info("TRACK_ORDER_SERVED", f"Served live dynamic order tracking to {clean_phone}")
+            track_text, track_btns = format_live_order_tracking(last_confirmed_order, current_lang)
+            chat_hist.append({"role": "user", "content": msg_body})
+            chat_hist.append({"role": "assistant", "content": track_text})
+            session["chat_history"] = chat_hist[-20:]
+            save_restaurant_session(clean_phone, restaurant_id, session)
+            return {
+                "reply_text": track_text,
+                "buttons": track_btns,
+                "order_state": OrderState.ORDER_CONFIRMED,
+                "customer_cart": last_confirmed_order.get("cart") or cart,
+                "customer_details": details,
+                "media_url": None,
+                "current_language": current_lang
+            }
+        elif cart.get("items"):
+            item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in cart["items"]])
+            reply = (
+                f"🛒 *Aapka Current Cart (Abhi confirm nahi hua):*\n\n"
+                f"{item_lines}\n\n"
+                f"💰 Total: *Rs. {cart['grand_total']}*\n\n"
+                "Kya is order ko checkout karein?"
+            )
+            buttons = ["Checkout Karein 🛒", "Loaded Fries 🍟", "Menu Dekhein 📋"]
+        else:
+            reply = get_template("cart_empty", current_lang)
+            buttons = get_buttons("menu", current_lang)
+
         chat_hist.append({"role": "user", "content": msg_body})
         chat_hist.append({"role": "assistant", "content": reply})
         session["chat_history"] = chat_hist[-20:]
@@ -1260,10 +1447,54 @@ def process_customer_message(
         return {
             "reply_text": reply,
             "buttons": buttons,
-            "order_state": OrderState.ORDER_CONFIRMED,
-            "customer_cart": ord_cart,
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
             "customer_details": details,
-            "media_url": SPEED_OK_GIF_URL,
+            "media_url": None,
+            "current_language": current_lang
+        }
+
+    # 0C. Cart Inquiry / Inspection Trigger (Never falsely claim cart is empty if active order exists!)
+    is_cart_query = (
+        btn_id in ["btn_cart", "btn_view_cart"] or
+        any(w in msg_lower for w in ["mera cart", "cart dikhao", "cart dekhna", "cart status", "my cart", "show cart", "view cart", "kya mangwaya"]) or
+        msg_lower in ["cart", "bill"]
+    )
+    if is_cart_query:
+        if session.get("order_state") == OrderState.ORDER_CONFIRMED and last_confirmed_order:
+            # Active confirmed order exists! Show live tracking status!
+            log_info("CART_SHOWED_ACTIVE_ORDER", f"Customer {clean_phone} inquired about cart after order confirmed; showing live tracker")
+            reply, buttons = format_live_order_tracking(last_confirmed_order, current_lang)
+        elif cart.get("items"):
+            item_lines = "\n".join([f"• {it['qty']}x {it['name']} ({it['variant']}) - Rs. {it['line_total']}" for it in cart["items"]])
+            reply = (
+                f"🛒 *Aapka Current Cart:* \n\n"
+                f"{item_lines}\n\n"
+                f"💰 Subtotal: Rs. {cart['subtotal']}\n"
+                f"🛵 Delivery Fee: Rs. {cart['delivery_fee']}\n"
+                f"Grand Total: *Rs. {cart['grand_total']}*\n\n"
+                f"Checkout karein ya mazeed kuch shamil karein?"
+            )
+            buttons = ["Checkout Karein 🛒", "Loaded Fries 🍟", "Menu Dekhein 📋"]
+        elif last_confirmed_order:
+            # An active order was previously placed! Show confirmed order tracker instead of empty cart!
+            log_info("CART_SHOWED_ACTIVE_ORDER", f"Customer {clean_phone} inquired about cart; showed active order tracker")
+            reply, buttons = format_live_order_tracking(last_confirmed_order, current_lang)
+        else:
+            reply = get_template("cart_empty", current_lang)
+            buttons = get_buttons("menu", current_lang)
+
+        chat_hist.append({"role": "user", "content": msg_body})
+        chat_hist.append({"role": "assistant", "content": reply})
+        session["chat_history"] = chat_hist[-20:]
+        save_restaurant_session(clean_phone, restaurant_id, session)
+        return {
+            "reply_text": reply,
+            "buttons": buttons,
+            "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+            "customer_cart": cart,
+            "customer_details": details,
+            "media_url": None,
             "current_language": current_lang
         }
 
@@ -1291,7 +1522,38 @@ def process_customer_message(
             "current_language": pending_lang
         }
 
-    # 2. Admin / Free Food / Zero-Payment Hack Blocker (Code Intercept, 0 LLM Tokens)
+    # 2. Smart Language Detection with 2-Turn Filter & Roman Urdu Immunity
+    is_entering_details = (session.get("order_state") == OrderState.COLLECTING_DETAILS)
+    detected_foreign = detect_foreign_language(msg_body, current_lang) if not is_entering_details else None
+    if detected_foreign and detected_foreign != current_lang:
+        consec = session.get("consecutive_foreign_msgs", 0) + 1
+        session["consecutive_foreign_msgs"] = consec
+        if consec >= 2:
+            offer_text, offer_btns = build_language_switch_offer(detected_foreign)
+            if offer_text:
+                log_info("LANG_OFFER_DISPATCHED", f"Detected 2 consecutive foreign messages ('{detected_foreign}') from {clean_phone}. Dispatched switch offer.")
+                session["pending_language"] = detected_foreign
+                chat_hist.append({"role": "user", "content": msg_body})
+                chat_hist.append({"role": "assistant", "content": offer_text})
+                session["chat_history"] = chat_hist[-20:]
+                save_restaurant_session(clean_phone, restaurant_id, session)
+                save_chat_history(clean_phone, restaurant_id, "user", msg_body)
+                save_chat_history(clean_phone, restaurant_id, "assistant", offer_text)
+                return {
+                    "reply_text": offer_text,
+                    "buttons": offer_btns,
+                    "order_state": session.get("order_state", OrderState.BROWSING_MENU),
+                    "customer_cart": cart,
+                    "customer_details": details,
+                    "media_url": None,
+                    "current_language": current_lang
+                }
+        else:
+            log_info("LANG_OFFER_DEFERRED", f"First foreign message detected ('{detected_foreign}') from {clean_phone}. Responding naturally without interruption.")
+    else:
+        session["consecutive_foreign_msgs"] = 0
+
+    # 3. Admin / Free Food / Zero-Payment Hack Blocker (Code Intercept, 0 LLM Tokens)
     admin_hack_patterns = [
         "admin hu", "admin hoon", "mein admin", "main admin", "owner hu", "malik hu", "restaurant ka malik",
         "developer hu", "zero payment", "payment zero", "payment 0", "free order", "free food", "muft khana",
@@ -1367,29 +1629,6 @@ def process_customer_message(
             "current_language": current_lang
         }
 
-    # 5. Smart Language Detection for Foreign Language
-    detected_foreign = detect_foreign_language(msg_body, current_lang)
-    if detected_foreign and detected_foreign != current_lang:
-        offer_text, offer_btns = build_language_switch_offer(detected_foreign)
-        if offer_text:
-            log_info("LANG_OFFER_DISPATCHED", f"Detected foreign language '{detected_foreign}' from {clean_phone}. Dispatched switch offer.")
-            session["pending_language"] = detected_foreign
-            chat_hist.append({"role": "user", "content": msg_body})
-            chat_hist.append({"role": "assistant", "content": offer_text})
-            session["chat_history"] = chat_hist[-20:]
-            save_restaurant_session(clean_phone, restaurant_id, session)
-            save_chat_history(clean_phone, restaurant_id, "user", msg_body)
-            save_chat_history(clean_phone, restaurant_id, "assistant", offer_text)
-            return {
-                "reply_text": offer_text,
-                "buttons": offer_btns,
-                "order_state": session.get("order_state", OrderState.BROWSING_MENU),
-                "customer_cart": cart,
-                "customer_details": details,
-                "media_url": None,
-                "current_language": current_lang
-            }
-
     # Build AI context
     current_context = {
         "order_state": session.get("order_state", OrderState.BROWSING_MENU),
@@ -1436,6 +1675,9 @@ def process_customer_message(
     parsed = extract_clean_json(ai_response_str)
 
     if parsed and isinstance(parsed, dict) and "reply_text" in parsed:
+        thought = parsed.get("thought")
+        if thought:
+            log_llm("LLM_MICRO_THOUGHT", f"🧠 {thought}")
         ai_reply_text = parsed.get("reply_text", "")
         ai_buttons = parsed.get("buttons", [])[:3]
         next_state = parsed.get("order_state", next_state)
@@ -1544,7 +1786,7 @@ def process_customer_message(
             media_url = None
         else:
             next_state = OrderState.ORDER_CONFIRMED
-            media_url = SPEED_OK_GIF_URL
+            media_url = CELEBRATION_IMAGE_URL
             order_id = session.get("active_order_id") or f"ORD-{int(time.time())}"
             session["active_order_id"] = order_id
             session["order_status"] = "PREPARING"
@@ -1734,11 +1976,13 @@ def process_whatsapp_data(data: dict):
             media_url = result.get("media_url")
 
             # Send WhatsApp response
-            if media_url:
+            if media_url and buttons:
+                send_whatsapp_buttons(restaurant_id, from_number, reply_text, buttons, wa_token)
+                send_whatsapp_image(restaurant_id, from_number, media_url, "Bawarchi express delivery raste mein hai! 🚀🍔", wa_token)
+                log_ok("WA_DELIVERED", f"Dispatched buttons + celebration/item photo to {from_number}")
+            elif media_url:
                 send_whatsapp_image(restaurant_id, from_number, media_url, reply_text, wa_token)
-                if buttons:
-                    send_whatsapp_buttons(restaurant_id, from_number, "Mazay karein! Agla step chunein:", buttons, wa_token)
-                log_ok("WA_DELIVERED", f"Dispatched media + buttons to {from_number}")
+                log_ok("WA_DELIVERED", f"Dispatched media image to {from_number}")
             elif buttons:
                 send_whatsapp_buttons(restaurant_id, from_number, reply_text, buttons, wa_token)
                 log_ok("WA_DELIVERED", f"Dispatched interactive buttons to {from_number}")
