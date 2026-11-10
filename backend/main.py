@@ -622,25 +622,32 @@ def verify_supabase_tables() -> dict:
 # WHATSAPP UTILITIES
 # =========================================================================================
 def send_whatsapp_text(restaurant_id: str, phone: str, text: str, token: str):
-    """Send text message via WhatsApp Business Cloud API."""
+    """Send text message via WhatsApp Business Cloud API with automatic chunking for >4000 chars."""
     url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{restaurant_id}/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "text",
-        "text": {"body": text}
-    }
-    try:
-        log_wa("SEND_TEXT_ATTEMPT", f"Sending WhatsApp text to {phone}: '{text[:60]}...'")
-        res = requests.post(url, headers=headers, json=payload, timeout=10)
-        res.raise_for_status()
-        msg_id = res.json().get("messages", [{}])[0].get("id")
-        log_ok("WA_TEXT_SENT", f"WhatsApp text delivered to {phone} (msg_id: {msg_id})")
-        return msg_id
-    except Exception as e:
-        log_error("WA_TEXT_FAILED", f"WhatsApp text send failed to {phone}: {e}", exc=e)
-        return None
+    
+    # Chunk text if it exceeds 4000 chars
+    chunks = [text[i:i+4000] for i in range(0, len(text), 4000)] if text else [""]
+    last_msg_id = None
+    
+    for chunk in chunks:
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": phone,
+            "type": "text",
+            "text": {"body": chunk}
+        }
+        try:
+            log_wa("SEND_TEXT_ATTEMPT", f"Sending WhatsApp text to {phone}: '{chunk[:60]}...'")
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            res.raise_for_status()
+            last_msg_id = res.json().get("messages", [{}])[0].get("id")
+            log_ok("WA_TEXT_SENT", f"WhatsApp text delivered to {phone} (msg_id: {last_msg_id})")
+        except Exception as e:
+            err_detail = f" | Details: {e.response.text}" if hasattr(e, 'response') and e.response is not None else ""
+            log_error("WA_TEXT_FAILED", f"WhatsApp text send failed to {phone}: {e}{err_detail}", exc=e)
+            
+    return last_msg_id
 
 def send_whatsapp_image(restaurant_id: str, phone: str, image_url: str, caption: str, token: str):
     """Send image message with caption via WhatsApp Business Cloud API."""
@@ -663,24 +670,41 @@ def send_whatsapp_image(restaurant_id: str, phone: str, image_url: str, caption:
         log_ok("WA_IMAGE_SENT", f"WhatsApp image delivered to {phone} (msg_id: {msg_id})")
         return msg_id
     except Exception as e:
-        log_error("WA_IMAGE_FAILED", f"WhatsApp image send failed to {phone}: {e}", exc=e)
+        err_detail = f" | Details: {e.response.text}" if hasattr(e, 'response') and e.response is not None else ""
+        log_error("WA_IMAGE_FAILED", f"WhatsApp image send failed to {phone}: {e}{err_detail}", exc=e)
         return None
 
 def send_whatsapp_buttons(restaurant_id: str, phone: str, text: str, buttons: list, token: str):
-    """Send interactive reply buttons via WhatsApp Business Cloud API."""
+    """
+    Send interactive reply buttons via WhatsApp Business Cloud API.
+    Guarantees compliance with Meta constraints:
+    - Button body text <= 1024 characters (splits to separate text msg if longer)
+    - Max 3 buttons
+    - Button title <= 20 characters
+    """
+    if not buttons:
+        return send_whatsapp_text(restaurant_id, phone, text, token)
+
+    # Meta interactive button body text has a strict maximum limit of 1024 characters
+    button_body_text = text
+    if len(text) > 1000:
+        # Send full text (e.g. 3,500-char full menu card) first as standard text
+        send_whatsapp_text(restaurant_id, phone, text, token)
+        button_body_text = "Apna manpasand item ya agla step chunein: 👇"
+
     url = f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{restaurant_id}/messages"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     actions = []
-    for btn in buttons:
+    for btn in buttons[:3]:
         if isinstance(btn, dict):
-            btn_id = btn["id"]
-            title = btn["title"]
+            btn_id = btn.get("id", "btn_opt")
+            title = btn.get("title", "Option")
         else:
             clean_title = re.sub(r'[^\w\s]', '', str(btn)).strip()
             btn_id = f"btn_{clean_title.lower().replace(' ', '_')}"
             title = str(btn)
-        actions.append({"type": "reply", "reply": {"id": btn_id, "title": title[:20]}})
+        actions.append({"type": "reply", "reply": {"id": str(btn_id)[:256], "title": str(title)[:20]}})
 
     payload = {
         "messaging_product": "whatsapp",
@@ -688,17 +712,18 @@ def send_whatsapp_buttons(restaurant_id: str, phone: str, text: str, buttons: li
         "type": "interactive",
         "interactive": {
             "type": "button",
-            "body": {"text": text},
-            "action": {"buttons": actions[:3]}
+            "body": {"text": button_body_text[:1024]},
+            "action": {"buttons": actions}
         }
     }
     try:
-        log_wa("SEND_BUTTONS_ATTEMPT", f"Sending {len(actions[:3])} buttons to {phone}: {[a['reply']['title'] for a in actions[:3]]}")
+        log_wa("SEND_BUTTONS_ATTEMPT", f"Sending {len(actions)} buttons to {phone}: {[a['reply']['title'] for a in actions]}")
         res = requests.post(url, headers=headers, json=payload, timeout=10)
         res.raise_for_status()
         log_ok("WA_BUTTONS_SENT", f"WhatsApp interactive buttons delivered to {phone}")
     except Exception as e:
-        log_error("WA_BUTTONS_FAILED", f"WhatsApp buttons send failed to {phone}: {e}", exc=e)
+        err_detail = f" | Details: {e.response.text}" if hasattr(e, 'response') and e.response is not None else ""
+        log_error("WA_BUTTONS_FAILED", f"WhatsApp buttons send failed to {phone}: {e}{err_detail}", exc=e)
 
 def download_audio_and_transcribe(audio_id: str, token: str) -> str:
     """Download audio voice note from WhatsApp and transcribe with Whisper."""
