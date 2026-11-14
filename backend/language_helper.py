@@ -393,6 +393,10 @@ def normalize_lang(lang_key: Optional[str]) -> str:
     if not lang_key:
         return "Roman_Urdu"
     l_str = str(lang_key).strip().lower().replace("-", "_").replace(" ", "_")
+    if "urdu_script" in l_str or "script" in l_str or "rasm" in l_str:
+        return "Urdu_Script"
+    if "roman" in l_str or l_str == "urdu":
+        return "Roman_Urdu"
     for key in LANGUAGES_CONFIG.keys():
         k_norm = key.lower()
         if l_str == k_norm:
@@ -501,8 +505,8 @@ def check_explicit_language_switch_request(text: str) -> Optional[str]:
 
     LANG_PATTERNS = [
         ("English", r'^(english|angrezi)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me|bolo|likho|can you speak)\s+(in\s+)?(english|angrezi)\b|\b(english|angrezi)\s+(please|plz|mein|me|bolo|likho)\b'),
-        ("Roman_Urdu", r'^(roman urdu|urdu)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me|bolo|likho)\s+(in\s+)?(roman urdu|urdu)\b|\b(roman urdu|urdu)\s+(mein|me|bolo|likho)\b'),
-        ("Urdu_Script", r'^(اردو|اردو رسم الخط)$|\b(اردو میں|اردو بولو|اردو لکھو)\b'),
+        ("Urdu_Script", r'\b(urdu\s+mein\s+baat\s+k(a)?ro|urdu\s+mein\s+baat\s+karein|urdu\s+mein\s+baat\s+kijiye|urdu\s+mein\s+bolo|urdu\s+mein\s+likho|urdu\s+script|urdu\s+rasm(ul|\s+ul|\s*-)?khat)\b|\b(اردو\s+میں\s+بات\s+کر(و|یں)|اردو\s+میں\s+بولو|اردو\s+میں\s+لکھو|اردو\s+رسم\s+الخط)\b'),
+        ("Roman_Urdu", r'^(roman\s+urdu|urdu)\s*(please|plz)?$|\b(roman\s+urdu|roman\s+urdu\s+mein|speak\s+roman\s+urdu|roman\s+urdu\s+bolo|switch\s+to\s+roman\s+urdu)\b|\b(speak|talk|chat|switch\s+to|in)\s+(in\s+)?(roman\s+urdu|urdu)\b'),
         ("Arabic", r'^(arabic|عربي|العربية)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me)\s+(in\s+)?arabic\b|\b(بالعربي|تكلم عربي)\b'),
         ("Hindi", r'^(hindi|हिन्दी|हिंदी)\s*(please|plz)?$|\b(speak|talk|chat|switch to|in|mein|me|bolo)\s+(in\s+)?hindi\b|\b(हिंदी में|हिन्दी में|हिंदी बोलो)\b'),
         ("Spanish", r'^(spanish|español|espanol)\s*(please|plz|por favor)?$|\b(speak|talk|chat|switch to|en|habla|hablar)\s+(in\s+)?(spanish|español|espanol)\b'),
@@ -544,12 +548,30 @@ def detect_foreign_language(text: str, current_lang: str = "Roman Urdu") -> Opti
 
     # Arabic and Urdu Script
     if re.search(r'[\u0600-\u06FF]', clean_text):
-        if re.search(r'[ٹڈڑںئےہ]', clean_text):
-            target = "Urdu_Script"
-        else:
-            target = "Arabic"
-        if norm_current != target:
-            return target
+        is_urdu_script = bool(re.search(r'[ٹڈڑںئےہھپچژگ]', clean_text)) or any(
+            w in clean_text for w in [
+                "ہے", "ہیں", "کا", "کی", "کے", "کو", "سے", "میں", "تھا", "تھی", "تھے",
+                "کرو", "کریں", "چاہیے", "بھائی", "استاد", "آپ", "مجھے", "کیا", "نہیں",
+                "والا", "والی", "والے", "کھانا", "برگر", "بریانی", "منگوا", "بتائیں", "سلام"
+            ]
+        )
+        if is_urdu_script:
+            # Per user mandate: When communicating in Urdu, bot ALWAYS speaks Roman Urdu
+            # unless the user explicitly requested "urdu mein baat kro".
+            # Therefore, NEVER flag Urdu script as a foreign language!
+            return None
+
+        # Check for genuine Arabic text
+        is_arabic = any(
+            w in clean_text for w in [
+                "مرحبا", "أريد", "اريد", "طلب", "طعام", "قائمة", "شكرا", "مطعم", "دجاج",
+                "وجبة", "توصيل", "کم", "السعر", "بكم", "من فضلك", "اهلا", "أهلا"
+            ]
+        ) or bool(re.search(r'\b(ال[ء-ي]+)\b', clean_text))
+        if is_arabic:
+            if norm_current != "Arabic":
+                return "Arabic"
+            return None
         return None
 
     # Russian Cyrillic

@@ -775,6 +775,7 @@ class MenuManager:
             target_lang_name = "Roman Urdu"
             lang_directive = (
                 "- Speak 100% in EASY, HILARIOUS, and CHARMING ROMAN URDU!\n"
+                "- Even if the customer writes in Urdu script (نستعلیق / عربی رسم الخط), you MUST ALWAYS reply in ROMAN URDU (using English letters like 'Aap kya khayenge?'), unless the customer explicitly asked to speak in Urdu script!\n"
                 "- Use friendly Pakistani street/foodie slang naturally (e.g. 'Arey Jani!', 'Ustaad jee!', 'Boss!').\n"
                 "- Keep it very funny, light-hearted, polite, and full of food emojis (🍔, 🍟, 🍗, 🥤, 🍕, 🤤, 🚀).\n"
                 "- Use simple, common daily words (no difficult formal Urdu, no boring robotic essays)."

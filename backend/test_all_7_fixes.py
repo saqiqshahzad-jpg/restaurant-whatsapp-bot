@@ -24,15 +24,22 @@ from language_helper import (
 from menu_manager import menu_manager
 
 def test_1_explicit_language_switch():
-    print("▶ Testing 1: Explicit Language Switch (Zero 'Press 1' friction)...")
+    print("▶ Testing 1: Explicit Language Switch & Urdu/Roman Urdu Protocol...")
     assert check_explicit_language_switch_request("english") == "English"
     assert check_explicit_language_switch_request("speak in english") == "English"
     assert check_explicit_language_switch_request("can you talk in english please") == "English"
     assert check_explicit_language_switch_request("switch to english") == "English"
     assert check_explicit_language_switch_request("roman urdu") == "Roman_Urdu"
-    assert check_explicit_language_switch_request("urdu mein baat karo") == "Roman_Urdu"
+    assert check_explicit_language_switch_request("urdu") == "Roman_Urdu"
+    # When user explicitly says "urdu mein baat kro", switch to Urdu Script!
+    assert check_explicit_language_switch_request("urdu mein baat kro") == "Urdu_Script"
+    assert check_explicit_language_switch_request("urdu mein baat karo") == "Urdu_Script"
     assert check_explicit_language_switch_request("speak arabic") == "Arabic"
     assert check_explicit_language_switch_request("kya biryani hai?") is None
+
+    # Urdu script input must NEVER trigger foreign language switch; bot stays in Roman Urdu
+    assert detect_foreign_language("السلام علیکم بھائی کیا حال ہے", "Roman Urdu") is None
+    assert detect_foreign_language("مجھے کرسپی زنگر برگر چاہیے", "Roman Urdu") is None
 
     test_phone = "+923330001111"
     reset_restaurant_session(test_phone)
@@ -40,7 +47,18 @@ def test_1_explicit_language_switch():
     assert res["current_language"] == "English"
     assert "Boom! English locked in!" in res["reply_text"] or "English" in res["reply_text"]
     assert "Press 1" not in res["reply_text"]
-    print("  ✅ Passed: Explicit language switch is instantaneous with 0ms delay and no 'Press 1' friction.")
+
+    # Test explicit switch to Urdu script
+    res_urdu = process_customer_message(test_phone, "urdu mein baat kro")
+    assert res_urdu["current_language"] == "Urdu_Script"
+    assert "اردو زبان" in res_urdu["reply_text"] or "ذائقہ" in res_urdu["reply_text"]
+
+    # Test switch back to Roman Urdu
+    res_roman = process_customer_message(test_phone, "roman urdu")
+    assert res_roman["current_language"] == "Roman_Urdu"
+    assert "Roman Urdu" in res_roman["reply_text"] or "Wapis Roman Urdu" in res_roman["reply_text"]
+
+    print("  ✅ Passed: Urdu protocol: defaults to Roman Urdu; switches to Urdu Script ONLY when user explicitly asks 'urdu mein baat kro'.")
 
 def test_2_minglish_loanwords_and_consecutive_filter():
     print("▶ Testing 2: Roman Urdu Loanwords Immunity & 2-Consecutive Foreign Message Filter...")
